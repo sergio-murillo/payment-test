@@ -285,6 +285,45 @@ describe('ProcessPaymentUseCase', () => {
       expect(result.error).toBe('Failed to tokenize card');
     });
 
+    it('should return error when tokenization result has no data.id', async () => {
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      transactionRepository.findById.mockResolvedValue(transaction);
+      wompiAdapter.tokenizeCard.mockResolvedValue({
+        status: 'CREATED',
+        data: {} as any, // No id field
+      });
+
+      const result = await useCase.execute({
+        transactionId: 'trans-001',
+        cardNumber: '4242424242424242',
+        cvc: '123',
+        expMonth: '08',
+        expYear: '28',
+        cardHolder: 'José Pérez',
+        installments: 1,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Failed to tokenize card');
+    });
+
     it('should handle errors gracefully', async () => {
       transactionRepository.findById.mockRejectedValue(
         new Error('Database error'),
@@ -303,6 +342,396 @@ describe('ProcessPaymentUseCase', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('Failed to process payment');
       expect(logger.error).toHaveBeenCalled();
+    });
+
+    describe('Step Function fallback in development', () => {
+      const originalEnv = process.env.NODE_ENV;
+      const originalIsOffline = process.env.IS_OFFLINE;
+
+      beforeEach(() => {
+        process.env.NODE_ENV = 'development';
+        process.env.IS_OFFLINE = 'true';
+      });
+
+      afterEach(() => {
+        process.env.NODE_ENV = originalEnv;
+        process.env.IS_OFFLINE = originalIsOffline;
+      });
+
+      it('should execute payment directly when Step Function does not exist in development', async () => {
+        const transaction = new Transaction(
+          'trans-001',
+          'prod-001',
+          100000,
+          3000,
+          15000,
+          118000,
+          TransactionStatus.PENDING,
+          'test@example.com',
+          'Test User',
+          'Test Address',
+          'Bogotá',
+          '+57 300 123 4567',
+          'idempotency-key-123',
+          new Date(),
+          new Date(),
+        );
+
+        transactionRepository.findById.mockResolvedValue(transaction);
+        wompiAdapter.tokenizeCard.mockResolvedValue({
+          status: 'CREATED',
+          data: {
+            id: 'tok_test_123',
+            created_at: '2024-01-01T00:00:00.000Z',
+            brand: 'VISA',
+            name: 'VISA',
+            last_four: '4242',
+            bin: '424242',
+            exp_year: '28',
+            exp_month: '08',
+            card_holder: 'José Pérez',
+            expires_at: '2028-08-31T23:59:59.000Z',
+          },
+        });
+
+        const stepFunctionError = new Error('StateMachineDoesNotExist');
+        stepFunctionsService.startExecution.mockRejectedValue(
+          stepFunctionError,
+        );
+
+        configService.get.mockImplementation((key: string) => {
+          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          return undefined;
+        });
+
+        wompiAdapter.createPayment.mockResolvedValue({
+          data: {
+            id: 'wompi-trans-123',
+            status: 'APPROVED',
+            amount_in_cents: 11800000,
+            currency: 'COP',
+            customer_email: 'test@example.com',
+            payment_method_type: 'CARD',
+            reference: 'trans-001',
+            created_at: new Date().toISOString(),
+          },
+        });
+
+        transactionRepository.update.mockResolvedValue(undefined);
+        eventStore.storeEvent.mockResolvedValue(undefined);
+        snsService.publish.mockResolvedValue(undefined);
+        updateInventoryUseCase.execute.mockResolvedValue({
+          success: true,
+          data: {} as any,
+        });
+
+        const result = await useCase.execute({
+          transactionId: 'trans-001',
+          cardNumber: '4242424242424242',
+          cvc: '123',
+          expMonth: '08',
+          expYear: '28',
+          cardHolder: 'José Pérez',
+          installments: 1,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.data?.executedDirectly).toBe(true);
+        expect(logger.warn).toHaveBeenCalledWith(
+          'Step Function not found in development, executing payment workflow directly',
+          'ProcessPaymentUseCase',
+        );
+        expect(wompiAdapter.createPayment).toHaveBeenCalled();
+        expect(updateInventoryUseCase.execute).toHaveBeenCalled();
+      });
+
+      it('should compensate transaction when payment fails in direct execution', async () => {
+        const transaction = new Transaction(
+          'trans-001',
+          'prod-001',
+          100000,
+          3000,
+          15000,
+          118000,
+          TransactionStatus.PENDING,
+          'test@example.com',
+          'Test User',
+          'Test Address',
+          'Bogotá',
+          '+57 300 123 4567',
+          'idempotency-key-123',
+          new Date(),
+          new Date(),
+        );
+
+        transactionRepository.findById.mockResolvedValue(transaction);
+        wompiAdapter.tokenizeCard.mockResolvedValue({
+          status: 'CREATED',
+          data: {
+            id: 'tok_test_123',
+            created_at: '2024-01-01T00:00:00.000Z',
+            brand: 'VISA',
+            name: 'VISA',
+            last_four: '4242',
+            bin: '424242',
+            exp_year: '28',
+            exp_month: '08',
+            card_holder: 'José Pérez',
+            expires_at: '2028-08-31T23:59:59.000Z',
+          },
+        });
+
+        const stepFunctionError = new Error('StateMachineDoesNotExist');
+        stepFunctionsService.startExecution.mockRejectedValue(
+          stepFunctionError,
+        );
+
+        configService.get.mockImplementation((key: string) => {
+          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          return undefined;
+        });
+
+        wompiAdapter.createPayment.mockRejectedValue(
+          new Error('Payment failed'),
+        );
+
+        compensateTransactionUseCase.execute.mockResolvedValue({
+          success: true,
+        });
+
+        const result = await useCase.execute({
+          transactionId: 'trans-001',
+          cardNumber: '4242424242424242',
+          cvc: '123',
+          expMonth: '08',
+          expYear: '28',
+          cardHolder: 'José Pérez',
+          installments: 1,
+        });
+
+        expect(result.success).toBe(false);
+        expect(compensateTransactionUseCase.execute).toHaveBeenCalledWith(
+          'trans-001',
+        );
+      });
+
+      it('should compensate transaction when inventory update fails after payment approval', async () => {
+        const transaction = new Transaction(
+          'trans-001',
+          'prod-001',
+          100000,
+          3000,
+          15000,
+          118000,
+          TransactionStatus.PENDING,
+          'test@example.com',
+          'Test User',
+          'Test Address',
+          'Bogotá',
+          '+57 300 123 4567',
+          'idempotency-key-123',
+          new Date(),
+          new Date(),
+        );
+
+        transactionRepository.findById.mockResolvedValue(transaction);
+        wompiAdapter.tokenizeCard.mockResolvedValue({
+          status: 'CREATED',
+          data: {
+            id: 'tok_test_123',
+            created_at: '2024-01-01T00:00:00.000Z',
+            brand: 'VISA',
+            name: 'VISA',
+            last_four: '4242',
+            bin: '424242',
+            exp_year: '28',
+            exp_month: '08',
+            card_holder: 'José Pérez',
+            expires_at: '2028-08-31T23:59:59.000Z',
+          },
+        });
+
+        const stepFunctionError = new Error('StateMachineDoesNotExist');
+        stepFunctionsService.startExecution.mockRejectedValue(
+          stepFunctionError,
+        );
+
+        configService.get.mockImplementation((key: string) => {
+          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          return undefined;
+        });
+
+        wompiAdapter.createPayment.mockResolvedValue({
+          data: {
+            id: 'wompi-trans-123',
+            status: 'APPROVED',
+            amount_in_cents: 11800000,
+            currency: 'COP',
+            customer_email: 'test@example.com',
+            payment_method_type: 'CARD',
+            reference: 'trans-001',
+            created_at: new Date().toISOString(),
+          },
+        });
+
+        transactionRepository.update.mockResolvedValue(undefined);
+        eventStore.storeEvent.mockResolvedValue(undefined);
+        snsService.publish.mockResolvedValue(undefined);
+        updateInventoryUseCase.execute.mockResolvedValue({
+          success: false,
+          error: 'Inventory update failed',
+        });
+        compensateTransactionUseCase.execute.mockResolvedValue({
+          success: true,
+        });
+
+        const result = await useCase.execute({
+          transactionId: 'trans-001',
+          cardNumber: '4242424242424242',
+          cvc: '123',
+          expMonth: '08',
+          expYear: '28',
+          cardHolder: 'José Pérez',
+          installments: 1,
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Inventory update failed');
+        expect(compensateTransactionUseCase.execute).toHaveBeenCalledWith(
+          'trans-001',
+        );
+        expect(logger.error).toHaveBeenCalled();
+      });
+
+      it('should handle unexpected errors in direct execution and compensate', async () => {
+        const transaction = new Transaction(
+          'trans-001',
+          'prod-001',
+          100000,
+          3000,
+          15000,
+          118000,
+          TransactionStatus.PENDING,
+          'test@example.com',
+          'Test User',
+          'Test Address',
+          'Bogotá',
+          '+57 300 123 4567',
+          'idempotency-key-123',
+          new Date(),
+          new Date(),
+        );
+
+        transactionRepository.findById.mockResolvedValue(transaction);
+        wompiAdapter.tokenizeCard.mockResolvedValue({
+          status: 'CREATED',
+          data: {
+            id: 'tok_test_123',
+            created_at: '2024-01-01T00:00:00.000Z',
+            brand: 'VISA',
+            name: 'VISA',
+            last_four: '4242',
+            bin: '424242',
+            exp_year: '28',
+            exp_month: '08',
+            card_holder: 'José Pérez',
+            expires_at: '2028-08-31T23:59:59.000Z',
+          },
+        });
+
+        const stepFunctionError = new Error('StateMachineDoesNotExist');
+        stepFunctionsService.startExecution.mockRejectedValue(
+          stepFunctionError,
+        );
+
+        configService.get.mockImplementation((key: string) => {
+          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          return undefined;
+        });
+
+        // Make createPayment throw an error to simulate unexpected error
+        wompiAdapter.createPayment.mockRejectedValue(
+          new Error('Unexpected error'),
+        );
+
+        compensateTransactionUseCase.execute.mockResolvedValue({
+          success: true,
+        });
+
+        // The error in createPayment is caught in executePaymentStep and returns a Result
+        // Then the outer try-catch catches any error thrown and returns a Result
+        const result = await useCase.execute({
+          transactionId: 'trans-001',
+          cardNumber: '4242424242424242',
+          cvc: '123',
+          expMonth: '08',
+          expYear: '28',
+          cardHolder: 'José Pérez',
+          installments: 1,
+        });
+
+        expect(result.success).toBe(false);
+        expect(compensateTransactionUseCase.execute).toHaveBeenCalledWith(
+          'trans-001',
+        );
+        expect(logger.error).toHaveBeenCalled();
+      });
+
+      it('should not execute directly when error is not StateMachineDoesNotExist', async () => {
+        const transaction = new Transaction(
+          'trans-001',
+          'prod-001',
+          100000,
+          3000,
+          15000,
+          118000,
+          TransactionStatus.PENDING,
+          'test@example.com',
+          'Test User',
+          'Test Address',
+          'Bogotá',
+          '+57 300 123 4567',
+          'idempotency-key-123',
+          new Date(),
+          new Date(),
+        );
+
+        transactionRepository.findById.mockResolvedValue(transaction);
+        wompiAdapter.tokenizeCard.mockResolvedValue({
+          status: 'CREATED',
+          data: {
+            id: 'tok_test_123',
+            created_at: '2024-01-01T00:00:00.000Z',
+            brand: 'VISA',
+            name: 'VISA',
+            last_four: '4242',
+            bin: '424242',
+            exp_year: '28',
+            exp_month: '08',
+            card_holder: 'José Pérez',
+            expires_at: '2028-08-31T23:59:59.000Z',
+          },
+        });
+
+        const otherError = new Error('Some other error');
+        stepFunctionsService.startExecution.mockRejectedValue(otherError);
+
+        // The error is caught by the outer try-catch and returns a Result
+        const result = await useCase.execute({
+          transactionId: 'trans-001',
+          cardNumber: '4242424242424242',
+          cvc: '123',
+          expMonth: '08',
+          expYear: '28',
+          cardHolder: 'José Pérez',
+          installments: 1,
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe('Failed to process payment');
+        expect(logger.warn).not.toHaveBeenCalled();
+        expect(logger.error).toHaveBeenCalled();
+      });
     });
   });
 
@@ -444,6 +873,153 @@ describe('ProcessPaymentUseCase', () => {
       expect(publishCall.status).toBe('DECLINED');
     });
 
+    it('should handle VOIDED payment status', async () => {
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      transactionRepository.findById.mockResolvedValue(transaction);
+      configService.get.mockReturnValue('pub_test_key');
+      wompiAdapter.createPayment.mockResolvedValue({
+        data: {
+          id: 'wompi-trans-123',
+          status: 'VOIDED',
+          amount_in_cents: 11800000,
+          currency: 'COP',
+          customer_email: 'test@example.com',
+          payment_method_type: 'CARD',
+          reference: 'trans-001',
+          created_at: new Date().toISOString(),
+          status_message: 'Payment voided',
+        },
+      });
+      transactionRepository.update.mockResolvedValue(undefined);
+      eventStore.storeEvent.mockResolvedValue(undefined);
+      snsService.publish.mockResolvedValue(undefined);
+
+      const result = await useCase.executePaymentStep(
+        'trans-001',
+        'token-123',
+        1,
+      );
+
+      expect(result.success).toBe(true);
+      const updateCall = transactionRepository.update.mock.calls[0][0];
+      expect(updateCall.status).toBe(TransactionStatus.DECLINED);
+      expect(updateCall.errorMessage).toBe('Payment voided');
+    });
+
+    it('should handle ERROR payment status', async () => {
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      transactionRepository.findById.mockResolvedValue(transaction);
+      configService.get.mockReturnValue('pub_test_key');
+      wompiAdapter.createPayment.mockResolvedValue({
+        data: {
+          id: 'wompi-trans-123',
+          status: 'ERROR',
+          amount_in_cents: 11800000,
+          currency: 'COP',
+          customer_email: 'test@example.com',
+          payment_method_type: 'CARD',
+          reference: 'trans-001',
+          created_at: new Date().toISOString(),
+        },
+      });
+      transactionRepository.update.mockResolvedValue(undefined);
+      eventStore.storeEvent.mockResolvedValue(undefined);
+      snsService.publish.mockResolvedValue(undefined);
+
+      const result = await useCase.executePaymentStep(
+        'trans-001',
+        'token-123',
+        1,
+      );
+
+      expect(result.success).toBe(true);
+      const updateCall = transactionRepository.update.mock.calls[0][0];
+      expect(updateCall.status).toBe(TransactionStatus.DECLINED);
+      expect(updateCall.errorMessage).toContain('Payment error');
+    });
+
+    it('should handle PENDING payment status and start polling', async () => {
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      transactionRepository.findById.mockResolvedValue(transaction);
+      configService.get.mockReturnValue('pub_test_key');
+      wompiAdapter.createPayment.mockResolvedValue({
+        data: {
+          id: 'wompi-trans-123',
+          status: 'PENDING',
+          amount_in_cents: 11800000,
+          currency: 'COP',
+          customer_email: 'test@example.com',
+          payment_method_type: 'CARD',
+          reference: 'trans-001',
+          created_at: new Date().toISOString(),
+        },
+      });
+      transactionRepository.update.mockResolvedValue(undefined);
+
+      const result = await useCase.executePaymentStep(
+        'trans-001',
+        'token-123',
+        1,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data?.status).toBe('PENDING');
+      expect(transactionRepository.update).toHaveBeenCalled();
+      const updateCall = transactionRepository.update.mock.calls[0][0];
+      expect(updateCall.wompiTransactionId).toBe('wompi-trans-123');
+    });
+
     it('should return error when transaction not found in executePaymentStep', async () => {
       transactionRepository.findById.mockResolvedValue(null);
 
@@ -489,6 +1065,159 @@ describe('ProcessPaymentUseCase', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('Failed to execute payment step');
       expect(logger.error).toHaveBeenCalled();
+    });
+
+    it('should handle unknown payment status that is not PENDING', async () => {
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      transactionRepository.findById.mockResolvedValue(transaction);
+      configService.get.mockReturnValue('pub_test_key');
+      wompiAdapter.createPayment.mockResolvedValue({
+        data: {
+          id: 'wompi-trans-123',
+          status: 'UNKNOWN_STATUS',
+          amount_in_cents: 11800000,
+          currency: 'COP',
+          customer_email: 'test@example.com',
+          payment_method_type: 'CARD',
+          reference: 'trans-001',
+          created_at: new Date().toISOString(),
+        },
+      });
+      transactionRepository.update.mockResolvedValue(undefined);
+
+      const result = await useCase.executePaymentStep(
+        'trans-001',
+        'token-123',
+        1,
+      );
+
+      // When status is not PENDING and not in the handled list (APPROVED, DECLINED, VOIDED, ERROR),
+      // updatedTransaction will be undefined, so it will fall through to the PENDING flow
+      expect(result.success).toBe(true);
+      expect(result.data?.status).toBe('PENDING');
+      // Should still save wompiTransactionId even for unknown status
+      expect(transactionRepository.update).toHaveBeenCalled();
+    });
+
+    it('should handle error when saving wompiTransactionId for pending payment', async () => {
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      transactionRepository.findById.mockResolvedValue(transaction);
+      configService.get.mockReturnValue('pub_test_key');
+      wompiAdapter.createPayment.mockResolvedValue({
+        data: {
+          id: 'wompi-trans-123',
+          status: 'PENDING',
+          amount_in_cents: 11800000,
+          currency: 'COP',
+          customer_email: 'test@example.com',
+          payment_method_type: 'CARD',
+          reference: 'trans-001',
+          created_at: new Date().toISOString(),
+        },
+      });
+      transactionRepository.update.mockRejectedValue(
+        new Error('Update failed'),
+      );
+
+      const result = await useCase.executePaymentStep(
+        'trans-001',
+        'token-123',
+        1,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Failed to execute payment step');
+    });
+  });
+
+  describe('pollPaymentStatus (indirect testing)', () => {
+    it('should start polling when payment status is PENDING', async () => {
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+        return undefined;
+      });
+
+      transactionRepository.findById.mockResolvedValue(transaction);
+
+      wompiAdapter.createPayment.mockResolvedValue({
+        data: {
+          id: 'wompi-trans-123',
+          status: 'PENDING',
+          amount_in_cents: 11800000,
+          currency: 'COP',
+          customer_email: 'test@example.com',
+          payment_method_type: 'CARD',
+          reference: 'trans-001',
+          created_at: new Date().toISOString(),
+        },
+      });
+
+      transactionRepository.update.mockResolvedValue(undefined);
+
+      const result = await useCase.executePaymentStep(
+        'trans-001',
+        'token-123',
+        1,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data?.status).toBe('PENDING');
+      // Verify that wompiTransactionId was saved
+      expect(transactionRepository.update).toHaveBeenCalled();
+      const updateCall = transactionRepository.update.mock.calls[0][0];
+      expect(updateCall.wompiTransactionId).toBe('wompi-trans-123');
     });
   });
 });
