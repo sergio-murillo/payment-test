@@ -8,6 +8,8 @@ import { LoggerService } from '../../shared/logger/logger.service';
 import { EventStoreService } from '../../event-store/application/event-store.service';
 import { SnsService } from '../../shared/messaging/sns.service';
 import { StepFunctionsService } from '../../shared/orchestration/step-functions.service';
+import { UpdateInventoryUseCase } from '../../inventory/application/update-inventory.use-case';
+import { CompensateTransactionUseCase } from './compensate-transaction.use-case';
 import { WOMPI_PAYMENT_ADAPTER_TOKEN } from '../payments.tokens';
 import { TRANSACTION_REPOSITORY_TOKEN } from '../../transactions/transactions.tokens';
 
@@ -27,6 +29,8 @@ export class ProcessPaymentUseCase {
     private readonly eventStoreService: EventStoreService,
     private readonly snsService: SnsService,
     private readonly stepFunctionsService: StepFunctionsService,
+    private readonly updateInventoryUseCase: UpdateInventoryUseCase,
+    private readonly compensateTransactionUseCase: CompensateTransactionUseCase,
     private readonly configService: ConfigService,
     private readonly logger: LoggerService,
   ) {}
@@ -57,25 +61,131 @@ export class ProcessPaymentUseCase {
         };
       }
 
-      // Start Step Function execution
-      const executionArn = await this.stepFunctionsService.startExecution({
-        transactionId: transaction.id,
-        paymentToken: dto.paymentToken,
-        installments: dto.installments,
+      // Tokenize card first
+      const tokenizationResult = await this.wompiAdapter.tokenizeCard({
+        number: dto.cardNumber,
+        cvc: dto.cvc,
+        expMonth: dto.expMonth,
+        expYear: dto.expYear,
+        cardHolder: dto.cardHolder,
       });
 
-      this.logger.debug(
-        `Step Function execution started: ${executionArn}`,
-        'ProcessPaymentUseCase',
-      );
+      if (
+        tokenizationResult.status !== 'CREATED' ||
+        !tokenizationResult.data?.id
+      ) {
+        return {
+          success: false,
+          error: 'Failed to tokenize card',
+        };
+      }
 
-      return {
-        success: true,
-        data: {
-          executionArn,
+      const paymentToken = tokenizationResult.data.id;
+
+      // Try to start Step Function execution, fallback to direct execution in development
+      const isDevelopment =
+        process.env.NODE_ENV === 'development' ||
+        process.env.IS_OFFLINE === 'true';
+
+      try {
+        const executionArn = await this.stepFunctionsService.startExecution({
           transactionId: transaction.id,
-        },
-      };
+          paymentToken: paymentToken,
+          installments: dto.installments,
+        });
+
+        this.logger.debug(
+          `Step Function execution started: ${executionArn}`,
+          'ProcessPaymentUseCase',
+        );
+
+        return {
+          success: true,
+          data: {
+            executionArn,
+            transactionId: transaction.id,
+          },
+        };
+      } catch (error) {
+        // In development, if Step Function doesn't exist, execute directly
+        if (
+          isDevelopment &&
+          error instanceof Error &&
+          (error.message.includes('StateMachineDoesNotExist') ||
+            error.message.includes('State Machine Does Not Exist'))
+        ) {
+          this.logger.warn(
+            'Step Function not found in development, executing payment workflow directly',
+            'ProcessPaymentUseCase',
+          );
+
+          // Execute the complete workflow: ProcessPayment -> UpdateInventory -> CompleteTransaction
+          // or CompensateTransaction if any step fails
+          try {
+            // Step 1: Process Payment
+            const paymentResult = await this.executePaymentStep(
+              transaction.id,
+              paymentToken,
+              dto.installments,
+            );
+
+            if (!paymentResult.success) {
+              // Compensate transaction on payment failure
+              await this.compensateTransactionUseCase.execute(transaction.id);
+              return paymentResult;
+            }
+
+            // Step 2: Update Inventory (only if payment was approved)
+            if (
+              paymentResult.data?.transaction?.status ===
+              TransactionStatus.APPROVED
+            ) {
+              const inventoryResult = await this.updateInventoryUseCase.execute(
+                transaction.productId,
+                1, // Assuming 1 unit per transaction
+              );
+
+              if (!inventoryResult.success) {
+                // Compensate transaction if inventory update fails
+                this.logger.error(
+                  `Inventory update failed for transaction ${transaction.id}, compensating`,
+                  'ProcessPaymentUseCase',
+                );
+                await this.compensateTransactionUseCase.execute(transaction.id);
+                return {
+                  success: false,
+                  error:
+                    inventoryResult.error ||
+                    'Failed to update inventory after payment',
+                };
+              }
+            }
+
+            // Step 3: CompleteTransaction (implicit - transaction is already updated)
+
+            return {
+              success: true,
+              data: {
+                transactionId: transaction.id,
+                executedDirectly: true,
+                ...paymentResult.data,
+              },
+            };
+          } catch (error) {
+            // Compensate transaction on any unexpected error
+            this.logger.error(
+              `Error in direct payment workflow execution, compensating transaction ${transaction.id}`,
+              error instanceof Error ? error.stack : String(error),
+              'ProcessPaymentUseCase',
+            );
+            await this.compensateTransactionUseCase.execute(transaction.id);
+            throw error;
+          }
+        }
+
+        // Re-throw error if not in development or different error
+        throw error;
+      }
     } catch (error) {
       this.logger.error(
         'Error processing payment',

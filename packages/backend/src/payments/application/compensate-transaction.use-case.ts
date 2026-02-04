@@ -1,6 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TransactionRepository } from '../../transactions/domain/transaction.repository';
-import { TransactionStatus } from '../../transactions/domain/transaction-status.enum';
 import { InventoryRepository } from '../../inventory/domain/inventory.repository';
 import { LoggerService } from '../../shared/logger/logger.service';
 import { EventStoreService } from '../../event-store/application/event-store.service';

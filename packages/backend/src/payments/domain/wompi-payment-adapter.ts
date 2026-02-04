@@ -1,8 +1,35 @@
 export interface WompiPaymentAdapter {
+  tokenizeCard(
+    cardData: WompiCardTokenizationRequest,
+  ): Promise<WompiCardTokenizationResponse>;
   createPayment(
     paymentData: WompiPaymentRequest,
   ): Promise<WompiPaymentResponse>;
   getPaymentStatus(transactionId: string): Promise<WompiPaymentStatus>;
+}
+
+export interface WompiCardTokenizationRequest {
+  number: string;
+  cvc: string;
+  expMonth: string;
+  expYear: string;
+  cardHolder: string;
+}
+
+export interface WompiCardTokenizationResponse {
+  status: string;
+  data: {
+    id: string;
+    created_at: string;
+    brand: string;
+    name: string;
+    last_four: string;
+    bin: string;
+    exp_year: string;
+    exp_month: string;
+    card_holder: string;
+    expires_at: string;
+  };
 }
 
 export interface WompiPaymentRequest {

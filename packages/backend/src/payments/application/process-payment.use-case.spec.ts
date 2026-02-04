@@ -6,6 +6,8 @@ import { TransactionRepository } from '../../transactions/domain/transaction.rep
 import { EventStoreService } from '../../event-store/application/event-store.service';
 import { SnsService } from '../../shared/messaging/sns.service';
 import { StepFunctionsService } from '../../shared/orchestration/step-functions.service';
+import { UpdateInventoryUseCase } from '../../inventory/application/update-inventory.use-case';
+import { CompensateTransactionUseCase } from './compensate-transaction.use-case';
 import { LoggerService } from '../../shared/logger/logger.service';
 import { Transaction } from '../../transactions/domain/transaction.entity';
 import { TransactionStatus } from '../../transactions/domain/transaction-status.enum';
@@ -19,11 +21,14 @@ describe('ProcessPaymentUseCase', () => {
   let eventStore: jest.Mocked<EventStoreService>;
   let snsService: jest.Mocked<SnsService>;
   let stepFunctionsService: jest.Mocked<StepFunctionsService>;
+  let updateInventoryUseCase: jest.Mocked<UpdateInventoryUseCase>;
+  let compensateTransactionUseCase: jest.Mocked<CompensateTransactionUseCase>;
   let configService: jest.Mocked<ConfigService>;
   let logger: jest.Mocked<LoggerService>;
 
   beforeEach(async () => {
     const mockWompiAdapter = {
+      tokenizeCard: jest.fn(),
       createPayment: jest.fn(),
     };
 
@@ -44,6 +49,14 @@ describe('ProcessPaymentUseCase', () => {
       startExecution: jest.fn(),
     };
 
+    const mockUpdateInventoryUseCase = {
+      execute: jest.fn(),
+    };
+
+    const mockCompensateTransactionUseCase = {
+      execute: jest.fn(),
+    };
+
     const mockConfigService = {
       get: jest.fn(),
     };
@@ -51,6 +64,7 @@ describe('ProcessPaymentUseCase', () => {
     const mockLogger = {
       debug: jest.fn(),
       error: jest.fn(),
+      warn: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -77,6 +91,14 @@ describe('ProcessPaymentUseCase', () => {
           useValue: mockStepFunctionsService,
         },
         {
+          provide: UpdateInventoryUseCase,
+          useValue: mockUpdateInventoryUseCase,
+        },
+        {
+          provide: CompensateTransactionUseCase,
+          useValue: mockCompensateTransactionUseCase,
+        },
+        {
           provide: ConfigService,
           useValue: mockConfigService,
         },
@@ -93,6 +115,8 @@ describe('ProcessPaymentUseCase', () => {
     eventStore = module.get(EventStoreService);
     snsService = module.get(SnsService);
     stepFunctionsService = module.get(StepFunctionsService);
+    updateInventoryUseCase = module.get(UpdateInventoryUseCase);
+    compensateTransactionUseCase = module.get(CompensateTransactionUseCase);
     configService = module.get(ConfigService);
     logger = module.get(LoggerService);
 
@@ -125,21 +149,47 @@ describe('ProcessPaymentUseCase', () => {
       );
 
       transactionRepository.findById.mockResolvedValue(transaction);
+      wompiAdapter.tokenizeCard.mockResolvedValue({
+        status: 'CREATED',
+        data: {
+          id: 'tok_test_1234567890',
+          created_at: '2020-01-02T18:52:35.850+00:00',
+          brand: 'VISA',
+          name: 'VISA-4242',
+          last_four: '4242',
+          bin: '424242',
+          exp_year: '28',
+          exp_month: '08',
+          card_holder: 'José Pérez',
+          expires_at: '2020-06-30T18:52:35.000Z',
+        },
+      });
       stepFunctionsService.startExecution.mockResolvedValue(
         'arn:aws:states:us-east-1:123456789012:execution:test',
       );
 
       const result = await useCase.execute({
         transactionId: 'trans-001',
-        paymentToken: 'token-123',
+        cardNumber: '4242424242424242',
+        cvc: '123',
+        expMonth: '08',
+        expYear: '28',
+        cardHolder: 'José Pérez',
         installments: 1,
       });
 
       expect(result.success).toBe(true);
       expect(result.data?.executionArn).toBeDefined();
+      expect(wompiAdapter.tokenizeCard).toHaveBeenCalledWith({
+        number: '4242424242424242',
+        cvc: '123',
+        expMonth: '08',
+        expYear: '28',
+        cardHolder: 'José Pérez',
+      });
       expect(stepFunctionsService.startExecution).toHaveBeenCalledWith({
         transactionId: 'trans-001',
-        paymentToken: 'token-123',
+        paymentToken: 'tok_test_1234567890',
         installments: 1,
       });
     });
@@ -149,7 +199,11 @@ describe('ProcessPaymentUseCase', () => {
 
       const result = await useCase.execute({
         transactionId: 'trans-999',
-        paymentToken: 'token-123',
+        cardNumber: '4242424242424242',
+        cvc: '123',
+        expMonth: '08',
+        expYear: '28',
+        cardHolder: 'José Pérez',
         installments: 1,
       });
 
@@ -180,12 +234,55 @@ describe('ProcessPaymentUseCase', () => {
 
       const result = await useCase.execute({
         transactionId: 'trans-001',
-        paymentToken: 'token-123',
+        cardNumber: '4242424242424242',
+        cvc: '123',
+        expMonth: '08',
+        expYear: '28',
+        cardHolder: 'José Pérez',
         installments: 1,
       });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('not in PENDING status');
+    });
+
+    it('should return error when card tokenization fails', async () => {
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      transactionRepository.findById.mockResolvedValue(transaction);
+      wompiAdapter.tokenizeCard.mockResolvedValue({
+        status: 'FAILED',
+        data: null as any,
+      });
+
+      const result = await useCase.execute({
+        transactionId: 'trans-001',
+        cardNumber: '4242424242424242',
+        cvc: '123',
+        expMonth: '08',
+        expYear: '28',
+        cardHolder: 'José Pérez',
+        installments: 1,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Failed to tokenize card');
     });
 
     it('should handle errors gracefully', async () => {
@@ -195,7 +292,11 @@ describe('ProcessPaymentUseCase', () => {
 
       const result = await useCase.execute({
         transactionId: 'trans-001',
-        paymentToken: 'token-123',
+        cardNumber: '4242424242424242',
+        cvc: '123',
+        expMonth: '08',
+        expYear: '28',
+        cardHolder: 'José Pérez',
         installments: 1,
       });
 

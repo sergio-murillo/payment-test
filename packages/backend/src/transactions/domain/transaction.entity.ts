@@ -44,7 +44,7 @@ export class Transaction {
   }
 
   toPersistence(): any {
-    return {
+    const data: any = {
       id: this.id,
       productId: this.productId,
       amount: this.amount,
@@ -57,12 +57,20 @@ export class Transaction {
       deliveryAddress: this.deliveryAddress,
       deliveryCity: this.deliveryCity,
       deliveryPhone: this.deliveryPhone,
-      wompiTransactionId: this.wompiTransactionId,
       idempotencyKey: this.idempotencyKey,
       createdAt: this.createdAt.toISOString(),
       updatedAt: this.updatedAt.toISOString(),
-      errorMessage: this.errorMessage,
     };
+
+    // Solo incluir campos opcionales si tienen valores definidos
+    if (this.wompiTransactionId !== undefined) {
+      data.wompiTransactionId = this.wompiTransactionId;
+    }
+    if (this.errorMessage !== undefined) {
+      data.errorMessage = this.errorMessage;
+    }
+
+    return data;
   }
 
   approve(wompiTransactionId: string): Transaction {

@@ -30,7 +30,7 @@ export class SnsService {
     this.snsClient = new SNSClient(clientConfig);
     this.topicArn = this.configService.get<string>(
       'SNS_TOPIC_ARN',
-      'arn:aws:sns:us-east-1:123456789012:wompi-payments-events-dev',
+      'arn:aws:sns:us-east-1:123456789012:dev-payments-events',
     );
   }
 

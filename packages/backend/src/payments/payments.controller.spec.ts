@@ -34,7 +34,11 @@ describe('PaymentsController', () => {
     it('should process payment successfully', async () => {
       const dto = {
         transactionId: 'trans-001',
-        paymentToken: 'token-123',
+        cardNumber: '4242424242424242',
+        cvc: '123',
+        expMonth: '08',
+        expYear: '28',
+        cardHolder: 'José Pérez',
         installments: 1,
       };
 
@@ -56,7 +60,11 @@ describe('PaymentsController', () => {
     it('should throw HttpException when use case fails', async () => {
       const dto = {
         transactionId: 'trans-001',
-        paymentToken: 'token-123',
+        cardNumber: '4242424242424242',
+        cvc: '123',
+        expMonth: '08',
+        expYear: '28',
+        cardHolder: 'José Pérez',
         installments: 1,
       };
 

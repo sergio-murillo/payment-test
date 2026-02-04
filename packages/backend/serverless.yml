@@ -63,15 +63,15 @@ plugins:
 
 custom:
   snsTopicArn:
-    dev: arn:aws:sns:us-east-1:123456789012:wompi-payments-events-dev
+    dev: arn:aws:sns:us-east-1:123456789012:dev-payments-events
     staging: arn:aws:sns:us-east-1:123456789012:wompi-payments-events-staging
     prod: arn:aws:sns:us-east-1:123456789012:wompi-payments-events-prod
   sqsQueueUrl:
-    dev: https://sqs.us-east-1.amazonaws.com/123456789012/wompi-payments-queue-dev
+    dev: https://sqs.us-east-1.amazonaws.com/123456789012/dev-payments-queue
     staging: https://sqs.us-east-1.amazonaws.com/123456789012/wompi-payments-queue-staging
     prod: https://sqs.us-east-1.amazonaws.com/123456789012/wompi-payments-queue-prod
   sqsQueueArn:
-    dev: arn:aws:sqs:us-east-1:123456789012:wompi-payments-queue-dev
+    dev: arn:aws:sqs:us-east-1:123456789012:dev-payments-queue
     staging: arn:aws:sqs:us-east-1:123456789012:wompi-payments-queue-staging
     prod: arn:aws:sqs:us-east-1:123456789012:wompi-payments-queue-prod
   stepFunctionArn:

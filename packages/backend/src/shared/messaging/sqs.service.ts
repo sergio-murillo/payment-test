@@ -41,7 +41,7 @@ export class SqsService {
     } else {
       // Construct default queue URL based on endpoint
       const endpoint = sqsEndpoint || 'http://localhost:4566';
-      this.queueUrl = `${endpoint}/000000000000/wompi-payments-queue-dev`;
+      this.queueUrl = `${endpoint}/000000000000/dev-payments-queue`;
     }
   }
 
