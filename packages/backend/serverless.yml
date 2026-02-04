@@ -1,0 +1,273 @@
+service: wompi-payments-backend
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+  memorySize: 512
+  timeout: 30
+  environment:
+    STAGE: ${self:provider.stage}
+    REGION: ${self:provider.region}
+    DYNAMODB_TABLE_PREFIX: ${self:provider.stage}
+    SNS_TOPIC_ARN: ${self:custom.snsTopicArn}
+    SQS_QUEUE_URL: ${self:custom.sqsQueueUrl}
+    STEP_FUNCTION_ARN: ${self:custom.stepFunctionArn}
+    WOMPI_API_URL: ${env:WOMPI_API_URL, 'https://api-sandbox.co.uat.wompi.dev/v1'}
+    WOMPI_PUBLIC_KEY: ${env:WOMPI_PUBLIC_KEY}
+    WOMPI_PRIVATE_KEY: ${env:WOMPI_PRIVATE_KEY}
+    WOMPI_INTEGRITY_SECRET: ${env:WOMPI_INTEGRITY_SECRET}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:BatchGetItem
+            - dynamodb:BatchWriteItem
+          Resource:
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_PREFIX}-*"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_PREFIX}-*/index/*"
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource:
+            - ${self:custom.snsTopicArn}
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource:
+            - ${self:custom.sqsQueueArn}
+        - Effect: Allow
+          Action:
+            - states:StartExecution
+            - states:DescribeExecution
+            - states:StopExecution
+          Resource:
+            - ${self:custom.stepFunctionArn}
+
+plugins:
+  - serverless-offline
+  - serverless-plugin-typescript
+
+custom:
+  snsTopicArn:
+    dev: arn:aws:sns:us-east-1:123456789012:wompi-payments-events-dev
+    staging: arn:aws:sns:us-east-1:123456789012:wompi-payments-events-staging
+    prod: arn:aws:sns:us-east-1:123456789012:wompi-payments-events-prod
+  sqsQueueUrl:
+    dev: https://sqs.us-east-1.amazonaws.com/123456789012/wompi-payments-queue-dev
+    staging: https://sqs.us-east-1.amazonaws.com/123456789012/wompi-payments-queue-staging
+    prod: https://sqs.us-east-1.amazonaws.com/123456789012/wompi-payments-queue-prod
+  sqsQueueArn:
+    dev: arn:aws:sqs:us-east-1:123456789012:wompi-payments-queue-dev
+    staging: arn:aws:sqs:us-east-1:123456789012:wompi-payments-queue-staging
+    prod: arn:aws:sqs:us-east-1:123456789012:wompi-payments-queue-prod
+  stepFunctionArn:
+    dev: arn:aws:states:us-east-1:123456789012:stateMachine:WompiPaymentProcessor-dev
+    staging: arn:aws:states:us-east-1:123456789012:stateMachine:WompiPaymentProcessor-staging
+    prod: arn:aws:states:us-east-1:123456789012:stateMachine:WompiPaymentProcessor-prod
+
+functions:
+  api:
+    handler: dist/main.handler
+    events:
+      - http:
+          path: /{proxy+}
+          method: ANY
+          cors: true
+      - http:
+          path: /
+          method: ANY
+          cors: true
+
+resources:
+  Resources:
+    ProductsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_TABLE_PREFIX}-products
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+
+    TransactionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_TABLE_PREFIX}-transactions
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: idempotencyKey
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: idempotencyKey-index
+            KeySchema:
+              - AttributeName: idempotencyKey
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+
+    InventoryTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_TABLE_PREFIX}-inventory
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: productId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: productId
+            KeyType: HASH
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+
+    EventStoreTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_TABLE_PREFIX}-event-store
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: aggregateId
+            AttributeType: S
+          - AttributeName: eventTimestamp
+            AttributeType: N
+        KeySchema:
+          - AttributeName: aggregateId
+            KeyType: HASH
+          - AttributeName: eventTimestamp
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: eventType-index
+            KeySchema:
+              - AttributeName: eventTimestamp
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    PaymentsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:provider.environment.DYNAMODB_TABLE_PREFIX}-payments-queue
+        VisibilityTimeout: 300
+        MessageRetentionPeriod: 1209600
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt PaymentsDLQ.Arn
+          maxReceiveCount: 3
+
+    PaymentsDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:provider.environment.DYNAMODB_TABLE_PREFIX}-payments-dlq
+        MessageRetentionPeriod: 1209600
+
+    PaymentsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:provider.environment.DYNAMODB_TABLE_PREFIX}-payments-events
+        DisplayName: Wompi Payments Events
+
+    PaymentProcessorStateMachine:
+      Type: AWS::StepFunctions::StateMachine
+      Properties:
+        StateMachineName: WompiPaymentProcessor-${self:provider.stage}
+        DefinitionString: !Sub |
+          {
+            "Comment": "Wompi Payment Processing Workflow",
+            "StartAt": "ValidateTransaction",
+            "States": {
+              "ValidateTransaction": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${ValidateTransactionFunction}",
+                  "Payload.$": "$"
+                },
+                "Next": "ProcessPayment"
+              },
+              "ProcessPayment": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${ProcessPaymentFunction}",
+                  "Payload.$": "$"
+                },
+                "Next": "UpdateInventory",
+                "Catch": [{
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.error",
+                  "Next": "CompensateTransaction"
+                }]
+              },
+              "UpdateInventory": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${UpdateInventoryFunction}",
+                  "Payload.$": "$"
+                },
+                "Next": "CompleteTransaction",
+                "Catch": [{
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.error",
+                  "Next": "CompensateTransaction"
+                }]
+              },
+              "CompleteTransaction": {
+                "Type": "Succeed"
+              },
+              "CompensateTransaction": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${CompensateTransactionFunction}",
+                  "Payload.$": "$"
+                },
+                "End": true
+              }
+            }
+          }
+        RoleArn: !GetAtt StepFunctionRole.Arn
+
+    StepFunctionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: states.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: StepFunctionExecutionPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - lambda:InvokeFunction
+                  Resource: "*"

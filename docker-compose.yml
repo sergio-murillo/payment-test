@@ -1,0 +1,161 @@
+version: '3.8'
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    container_name: wompi-dynamodb
+    ports:
+      - "8000:8000"
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Script para crear tablas de DynamoDB automáticamente
+  dynamodb-init:
+    build:
+      context: .
+      dockerfile: scripts/Dockerfile.dynamodb-init
+    container_name: wompi-dynamodb-init
+    depends_on:
+      dynamodb:
+        condition: service_started
+    environment:
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+      - AWS_DEFAULT_REGION=us-east-1
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: wompi-localstack
+    ports:
+      - "4566:4566"
+      - "4510-4559:4510-4559"
+    environment:
+      - SERVICES=sqs,sns,stepfunctions
+      - DEBUG=0
+      - DATA_DIR=/var/lib/localstack
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - PERSISTENCE=0
+      - LAMBDA_EXECUTOR=local
+    volumes:
+      - "localstack-data:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    tmpfs:
+      - /tmp
+
+  # Script para crear recursos de SNS/SQS en LocalStack automáticamente
+  localstack-init:
+    build:
+      context: .
+      dockerfile: scripts/Dockerfile.localstack-init
+    container_name: wompi-localstack-init
+    depends_on:
+      localstack:
+        condition: service_started
+    environment:
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+      - AWS_DEFAULT_REGION=us-east-1
+
+  # Servicio que hace polling automático de colas SQS e invoca lambdas
+  sqs-lambda-poller:
+    build:
+      context: .
+      dockerfile: scripts/Dockerfile.sqs-poller
+    container_name: wompi-sqs-poller
+    depends_on:
+      localstack:
+        condition: service_started
+      localstack-init:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
+    environment:
+      - SQS_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+      - NODE_ENV=development
+      - STAGE=dev
+      - DYNAMODB_ENDPOINT=http://dynamodb:8000
+      - SNS_ENDPOINT=http://localstack:4566
+      - DYNAMODB_TABLE_PREFIX=dev
+      - SNS_TOPIC_ARN=arn:aws:sns:us-east-1:000000000000:dev-payments-events
+      - SQS_QUEUE_URL=http://localstack:4566/000000000000/dev-payments-queue
+    volumes:
+      # Montar el código completo para poder ejecutar los handlers
+      - ./packages/backend:/app/packages/backend:ro
+      - ./node_modules:/app/node_modules:ro
+      - ./packages/backend/node_modules:/app/packages/backend/node_modules:ro
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./packages/backend
+      dockerfile: Dockerfile.dev
+    container_name: wompi-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - REGION=us-east-1
+      - DYNAMODB_TABLE_PREFIX=dev
+      # AWS Service Endpoints (using Docker service names)
+      - DYNAMODB_ENDPOINT=http://dynamodb:8000
+      - SQS_ENDPOINT=http://localstack:4566
+      - SNS_ENDPOINT=http://localstack:4566
+      - STEP_FUNCTIONS_ENDPOINT=http://localstack:4566
+      # AWS Services
+      - SNS_TOPIC_ARN=arn:aws:sns:us-east-1:000000000000:dev-payments-events
+      - SQS_QUEUE_URL=http://localstack:4566/000000000000/dev-payments-queue
+      - STEP_FUNCTION_ARN=arn:aws:states:us-east-1:123456789012:stateMachine:WompiPaymentProcessor-dev
+      # Wompi API Configuration
+      - WOMPI_API_URL=https://api-sandbox.co.uat.wompi.dev/v1
+      - WOMPI_PUBLIC_KEY=pub_stagtest_g2u0HQd3ZMh05hsSgTS2lUV8t3s4mOt7
+      - WOMPI_PRIVATE_KEY=prv_stagtest_5i0ZGIGiFcDQifYsXxvsny7Y37tKqFWg
+      - WOMPI_INTEGRITY_SECRET=stagtest_integrity_nAIBuqayW70XpUqJS4qf4STYiISd89Fp
+      - FRONTEND_URL=http://frontend:3000
+      - LOG_LEVEL=info
+      - IS_OFFLINE=true
+    depends_on:
+      dynamodb:
+        condition: service_started
+      dynamodb-init:
+        condition: service_completed_successfully
+      localstack:
+        condition: service_started
+      localstack-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./packages/backend:/app
+      - /app/node_modules
+    command: npm run dev
+
+  frontend:
+    build:
+      context: ./packages/frontend
+      dockerfile: Dockerfile.dev
+    container_name: wompi-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    depends_on:
+      - backend
+    volumes:
+      - ./packages/frontend:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+
+volumes:
+  localstack-data:
