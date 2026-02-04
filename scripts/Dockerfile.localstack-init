@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+# Instalar boto3 y curl
+RUN pip install --no-cache-dir boto3 && \
+    apt-get update && \
+    apt-get install -y curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copiar el script
+COPY scripts/create-localstack-resources.py /usr/local/bin/create-localstack-resources.py
+
+# Hacer el script ejecutable
+RUN chmod +x /usr/local/bin/create-localstack-resources.py
+
+# Comando por defecto
+CMD ["python", "/usr/local/bin/create-localstack-resources.py"]
