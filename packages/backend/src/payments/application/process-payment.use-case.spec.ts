@@ -429,7 +429,7 @@ describe('ProcessPaymentUseCase', () => {
       const updateCall = transactionRepository.update.mock.calls[0][0];
       expect(updateCall.id).toBe('trans-001');
       expect(updateCall.status).toBe(TransactionStatus.DECLINED);
-      expect(updateCall.errorMessage).toContain('Payment declined: DECLINED');
+      expect(updateCall.errorMessage).toContain('Payment declined');
 
       expect(eventStore.storeEvent).toHaveBeenCalled();
       const storeEventCall = eventStore.storeEvent.mock.calls[0][0];

@@ -16,6 +16,7 @@ import {
 } from '@nestjs/swagger';
 import { CreateTransactionUseCase } from './application/create-transaction.use-case';
 import { GetTransactionUseCase } from './application/get-transaction.use-case';
+import { GetAllTransactionsUseCase } from './application/get-all-transactions.use-case';
 import { CreateTransactionDto } from './application/create-transaction.dto';
 import { TransactionResponseDto } from './application/transaction-response.dto';
 import {
@@ -29,6 +30,7 @@ export class TransactionsController {
   constructor(
     private readonly createTransactionUseCase: CreateTransactionUseCase,
     private readonly getTransactionUseCase: GetTransactionUseCase,
+    private readonly getAllTransactionsUseCase: GetAllTransactionsUseCase,
   ) {}
 
   @Post()
@@ -96,6 +98,34 @@ export class TransactionsController {
         result.error === 'Transaction not found'
           ? HttpStatus.NOT_FOUND
           : HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    return {
+      success: true,
+      data: result.data,
+    };
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'Get all transactions' })
+  @ApiResponse({
+    status: 200,
+    description: 'Transactions retrieved successfully',
+    type: ApiResponseDto<TransactionResponseDto[]>,
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    type: ApiErrorResponseDto,
+  })
+  async getAllTransactions() {
+    const result = await this.getAllTransactionsUseCase.execute();
+
+    if (!result.success) {
+      throw new HttpException(
+        result.error || 'Failed to get all transactions',
+        HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
 

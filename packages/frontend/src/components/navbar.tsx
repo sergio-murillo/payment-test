@@ -11,7 +11,6 @@ export function Navbar() {
   const { currentTransaction } = useAppSelector((state) => state.transaction);
 
   const isHome = pathname === '/';
-  const isCheckout = pathname.startsWith('/checkout');
 
   const hasPendingTransaction =
     currentTransaction && ['PENDING'].includes(currentTransaction.status);
@@ -44,17 +43,9 @@ export function Navbar() {
             </button>
           </Tooltip>
 
-          <Tooltip title={hasPendingTransaction ? 'Ver transacción en curso' : 'Carrito'}>
-            <button
-              className={`navbar-btn ${isCheckout ? 'navbar-btn-active' : ''}`}
-              onClick={() => {
-                if (currentTransaction?.id) {
-                  router.push(`/checkout/${currentTransaction.id}`);
-                }
-              }}
-              disabled={!currentTransaction?.id}
-              aria-label="Ir al checkout"
-            >
+          {hasPendingTransaction && (
+            <Tooltip title="Tienes una transacción en curso">
+              <div className="navbar-btn" style={{ opacity: 0.6, cursor: 'default' }}>
               <Badge
                 dot={!!hasPendingTransaction}
                 offset={[-2, 2]}
@@ -67,9 +58,10 @@ export function Navbar() {
                   }}
                 />
               </Badge>
-              <span className="navbar-btn-label">Checkout</span>
-            </button>
+                <span className="navbar-btn-label">Pago en curso</span>
+              </div>
           </Tooltip>
+          )}
         </div>
       </div>
     </nav>

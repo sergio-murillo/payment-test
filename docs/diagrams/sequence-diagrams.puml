@@ -1,11 +1,12 @@
 @startuml Flujo Completo de Pago
-title Flujo Completo de Pago - Cliente a Wompi
+title Flujo Completo de Pago - Cliente a Wompi (Actualizado)
 
 actor Cliente
 participant Frontend
 participant "ProductsController" as PC
 participant "GetProductUseCase" as GPU
 participant "ProductRepository" as PR
+participant "CheckoutPage" as Checkout
 participant "TransactionsController" as TC
 participant "CreateTransactionUseCase" as CTU
 participant "TransactionRepository" as TR
@@ -17,7 +18,7 @@ participant "WompiPaymentAdapter" as WPA
 participant "Wompi API" as Wompi
 participant "UpdateInventoryUseCase" as UIU
 participant "InventoryRepository" as IR
-participant "SnsService" as SNS
+participant "CompensateTransactionUseCase" as CTUComp
 
 == Visualización de Producto ==
 Cliente -> Frontend: Accede a página de producto
@@ -29,9 +30,17 @@ GPU --> PC: Result<Product>
 PC --> Frontend: Product data
 Frontend --> Cliente: Muestra producto
 
-== Creación de Transacción ==
-Cliente -> Frontend: Completa formulario de pago
-Frontend -> TC: POST /transactions
+== Inicio de Checkout ==
+Cliente -> Frontend: Hace clic en "Pagar"
+Frontend -> Frontend: router.push('/checkout/:productId')
+Frontend -> Checkout: Carga página de checkout
+Checkout -> PC: GET /products/:productId
+PC --> Checkout: Product data
+Checkout --> Cliente: Muestra formulario de pago
+
+== Creación de Transacción y Procesamiento ==
+Cliente -> Frontend: Completa formulario de pago\n(datos personales + tarjeta)
+Frontend -> TC: POST /transactions\n(datos personales)
 TC -> CTU: execute(dto)
 CTU -> TR: findByIdempotencyKey(key)
 alt Transacción ya existe
@@ -45,50 +54,133 @@ else Nueva transacción
     CTU --> TC: Result (new transaction)
 end
 TC --> Frontend: Transaction created
-Frontend --> Cliente: Redirige a checkout
 
-== Procesamiento de Pago ==
-Cliente -> Frontend: Confirma pago
-Frontend -> PayC: POST /payments/process
+Frontend -> PayC: POST /payments/process\n(cardNumber, cvc, expMonth, expYear, cardHolder)
 PayC -> PPU: execute(paymentDto)
 PPU -> TR: findById(transactionId)
 TR --> PPU: Transaction
+
+== Tokenización de Tarjeta ==
+PPU -> WPA: tokenizeCard(cardData)
+WPA -> Wompi: POST /v1/tokens/cards\n(Authorization: public_key)
+Wompi --> WPA: Token Response
+WPA --> PPU: paymentToken
+
+alt Tokenización fallida
+    PPU --> PayC: Error
+    PayC --> Frontend: Payment failed
+else Tokenización exitosa
+    PPU -> PPU: paymentToken obtenido
+    
+    == Procesamiento de Pago ==
+    alt Step Function disponible
 PPU -> SFS: startExecution(paymentData)
 SFS -> SFS: Step Function iniciada
 PPU --> PayC: Execution ARN
 PayC --> Frontend: Payment processing started
 
 == Step Function: Procesar Pago ==
-SFS -> WPA: createPayment(paymentData)
+        SFS -> WPA: createPayment(paymentToken, transactionData)
+        WPA -> Wompi: GET /merchants/:public_key
+        Wompi --> WPA: acceptance_token
+        WPA -> WPA: calculateSignature()
 WPA -> Wompi: POST /transactions
 Wompi --> WPA: Payment Response
 WPA --> SFS: Payment Result
+        
+        alt Pago PENDING (asíncrono)
+            SFS -> TR: update(transaction.setWompiTransactionId())
+            SFS -> PPU: pollPaymentStatus(wompiTransactionId)
+            note right of PPU: Polling cada 10s\nhasta 2 minutos
+            loop Polling de estado
+                PPU -> WPA: getPaymentStatus(wompiTransactionId)
+                WPA -> Wompi: GET /v1/transactions/:id
+                Wompi --> WPA: Payment Status
+                WPA --> PPU: Status Response
+                alt Status != PENDING
+                    PPU -> TR: update(transaction con estado final)
+                    PPU -> PPU: Stop polling
+                end
+            end
+        end
 
 alt Pago Aprobado
     SFS -> TR: update(transaction.approve())
     SFS -> ES: storeEvent(PaymentProcessed)
-    SFS -> SNS: publish(PaymentProcessed)
     SFS -> UIU: execute(productId, quantity)
     UIU -> IR: decrement(productId, quantity)
     note right of IR: Actualización atómica\ncon condición de carrera
     IR --> UIU: Updated Inventory
     UIU -> ES: storeEvent(InventoryUpdated)
     UIU --> SFS: Success
-    SFS -> TR: update(transaction.complete())
 else Pago Declinado
     SFS -> TR: update(transaction.decline())
     SFS -> ES: storeEvent(PaymentDeclined)
-    SFS -> SNS: publish(PaymentDeclined)
-    SFS -> "CompensateTransactionUseCase": execute(transactionId)
-    note right of "CompensateTransactionUseCase": Operación de compensación
+            SFS -> CTUComp: execute(transactionId)
+            CTUComp -> TR: update(transaction.cancel())
+            CTUComp -> ES: storeEvent(TransactionCompensated)
+            CTUComp --> SFS: Compensation completed
+        end
+    else Step Function no disponible (desarrollo)
+        note right of PPU: Fallback: ejecución directa\nen desarrollo
+        PPU -> PPU: executePaymentStep()
+        PPU -> WPA: createPayment(paymentToken, transactionData)
+        WPA -> Wompi: GET /merchants/:public_key
+        Wompi --> WPA: acceptance_token
+        WPA -> WPA: calculateSignature()
+        WPA -> Wompi: POST /transactions
+        Wompi --> WPA: Payment Response
+        
+        alt Pago PENDING (asíncrono)
+            PPU -> TR: update(transaction.setWompiTransactionId())
+            PPU -> PPU: pollPaymentStatus(wompiTransactionId)
+            note right of PPU: Polling cada 10s\nhasta 2 minutos
+            loop Polling de estado
+                PPU -> WPA: getPaymentStatus(wompiTransactionId)
+                WPA -> Wompi: GET /v1/transactions/:id
+                Wompi --> WPA: Payment Status
+                WPA --> PPU: Status Response
+                alt Status != PENDING
+                    PPU -> TR: update(transaction con estado final)
+                    PPU -> PPU: Stop polling
+                end
+            end
+        end
+        
+        alt Pago Aprobado
+            PPU -> TR: update(transaction.approve())
+            PPU -> ES: storeEvent(PaymentProcessed)
+            PPU -> UIU: execute(productId, quantity)
+            UIU -> IR: decrement(productId, quantity)
+            IR --> UIU: Updated Inventory
+            UIU -> ES: storeEvent(InventoryUpdated)
+            UIU --> PPU: Success
+        else Pago Declinado
+            PPU -> TR: update(transaction.decline())
+            PPU -> ES: storeEvent(PaymentDeclined)
+            PPU -> CTUComp: execute(transactionId)
+            CTUComp -> TR: update(transaction.cancel())
+            CTUComp -> ES: storeEvent(TransactionCompensated)
+            CTUComp --> PPU: Compensation completed
+        end
+        
+        PPU --> PayC: Payment processed
+        PayC --> Frontend: Payment result
+    end
 end
 
-== Consulta de Estado ==
-Frontend -> TC: GET /transactions/:id (polling)
+== Consulta de Estado (Polling Frontend) ==
+loop Polling de estado (Frontend)
+    Frontend -> TC: GET /transactions/:id
 TC -> TR: findById(transactionId)
 TR --> TC: Transaction
 TC --> Frontend: Transaction status
-Frontend --> Cliente: Muestra resultado
+    
+    alt Transaction status != PENDING
+        Frontend -> Frontend: Stop polling
+        Frontend --> Cliente: Muestra resultado final
+    end
+end
 
 @enduml
 
@@ -212,10 +304,12 @@ CTU --> Frontend: Result (new transaction)
 @enduml
 
 @startuml Flujo Frontend - Redux y API
-title Interacción Frontend con Backend usando Redux
+title Interacción Frontend con Backend usando Redux (Actualizado)
 
 actor Usuario
-participant "React Component" as Component
+participant "ProductPage" as ProductPage
+participant "CheckoutPage" as CheckoutPage
+participant "PaymentForm" as PaymentForm
 participant "Redux Store" as Store
 participant "Redux Thunk" as Thunk
 participant "API Client" as API
@@ -223,54 +317,75 @@ participant "Backend API" as Backend
 
 == Carga de Productos ==
 
-Usuario -> Component: Visita página principal
-Component -> Store: dispatch(fetchProducts())
-Store -> Thunk: fetchProducts()
-Thunk -> API: GET /products
-API -> Backend: HTTP GET /products
-Backend --> API: Products array
+Usuario -> ProductPage: Visita página de producto
+ProductPage -> Store: dispatch(fetchProduct(id))
+Store -> Thunk: fetchProduct(id)
+Thunk -> API: GET /products/:id
+API -> Backend: HTTP GET /products/:id
+Backend --> API: Product data
 API --> Thunk: Response data
-Thunk -> Store: productsSlice.fulfilled(products)
-Store --> Component: State updated
-Component --> Usuario: Renderiza productos
+Thunk -> Store: productsSlice.fulfilled(product)
+Store --> ProductPage: State updated
+ProductPage --> Usuario: Renderiza producto
 
-== Creación de Transacción ==
+== Inicio de Checkout ==
 
-Usuario -> Component: Completa formulario de pago
-Component -> Store: dispatch(createTransaction(data))
+Usuario -> ProductPage: Hace clic en "Pagar"
+ProductPage -> ProductPage: router.push('/checkout/:productId')
+ProductPage -> CheckoutPage: Navega a checkout
+CheckoutPage -> Store: dispatch(fetchProduct(productId))
+Store -> Thunk: fetchProduct(productId)
+Thunk -> API: GET /products/:productId
+API -> Backend: HTTP GET /products/:productId
+Backend --> API: Product data
+API --> Thunk: Response data
+Thunk -> Store: productsSlice.fulfilled(product)
+Store --> CheckoutPage: State updated
+CheckoutPage -> PaymentForm: Renderiza formulario
+PaymentForm --> Usuario: Muestra formulario de pago
+
+== Creación de Transacción y Procesamiento ==
+
+Usuario -> PaymentForm: Completa formulario\n(datos personales + tarjeta)
+PaymentForm -> PaymentForm: handlePaymentSubmit()
+PaymentForm -> Store: dispatch(createTransaction(data))
 Store -> Thunk: createTransaction(data)
 Thunk -> API: POST /transactions
 API -> Backend: HTTP POST /transactions
 Backend --> API: Transaction created
 API --> Thunk: Transaction data
 Thunk -> Store: transactionSlice.fulfilled(transaction)
-Store --> Component: State updated
-Component -> Component: router.push('/checkout/:id')
+Store --> PaymentForm: State updated
 
-== Procesamiento de Pago ==
-
-Usuario -> Component: Confirma pago en checkout
-Component -> Store: dispatch(processPayment(data))
-Store -> Thunk: processPayment(data)
-Thunk -> API: POST /payments/process
+PaymentForm -> PaymentForm: setProcessing(true)
+PaymentForm -> Store: dispatch(processPayment(cardData))
+Store -> Thunk: processPayment(cardData)
+Thunk -> API: POST /payments/process\n{transactionId, cardNumber, cvc, expMonth, expYear, cardHolder}
 API -> Backend: HTTP POST /payments/process
-Backend --> API: Execution started
-API --> Thunk: Execution ARN
+Backend --> API: Payment processing started
+API --> Thunk: Response
+Thunk -> Store: processPayment.fulfilled()
+Store --> PaymentForm: State updated
+PaymentForm --> Usuario: Muestra loader de progreso
 
-loop Polling de estado
+== Polling de Estado ==
+
+loop Polling cada 2 segundos (máx 15 intentos)
+    PaymentForm -> Store: dispatch(fetchTransaction(transactionId))
+    Store -> Thunk: fetchTransaction(transactionId)
     Thunk -> API: GET /transactions/:id
     API -> Backend: HTTP GET /transactions/:id
     Backend --> API: Transaction status
     API --> Thunk: Transaction data
     Thunk -> Store: transactionSlice.fulfilled(transaction)
+    Store --> PaymentForm: State updated
     
     alt Transaction status != PENDING
-        Thunk -> Store: Stop polling
+        PaymentForm -> PaymentForm: Stop polling
+        PaymentForm -> PaymentForm: setProcessing(false)
+        PaymentForm --> Usuario: Muestra resultado final\n(APPROVED o DECLINED)
     end
 end
-
-Store --> Component: State updated
-Component --> Usuario: Muestra resultado del pago
 
 @enduml
 
@@ -278,6 +393,8 @@ Component --> Usuario: Muestra resultado del pago
 title Event Sourcing y Auditoría
 
 participant "Use Case" as UC
+participant "EventStoreController" as ESC
+participant "GetAllEventsUseCase" as GAEU
 participant "EventStoreService" as ES
 participant "DynamoDB" as DB
 participant "SnsService" as SNS
@@ -300,7 +417,7 @@ SNS -> Topic: Publish message
 Topic -> Subs: Notify subscribers
 note right of Subs: Múltiples suscriptores\npueden procesar el evento
 
-== Consulta de Eventos ==
+== Consulta de Eventos por Agregado ==
 
 UC -> ES: getEventsByAggregateId(id)
 ES -> DB: QUERY event-store\nBY aggregateId
@@ -308,66 +425,157 @@ DB --> ES: Events array
 ES -> ES: sort by timestamp
 ES --> UC: Events history
 
-note over UC, DB: Event Store permite:\n- Auditoría completa\n- Reconstrucción de estado\n- Análisis de eventos
+== Consulta de Todos los Eventos ==
+
+UC -> ESC: GET /event-store
+ESC -> GAEU: execute()
+GAEU -> DB: SCAN event-store
+DB --> GAEU: All events
+GAEU -> GAEU: sort by timestamp
+GAEU --> ESC: Events array
+ESC --> UC: All events
+
+note over UC, DB: Event Store permite:\n- Auditoría completa\n- Reconstrucción de estado\n- Análisis de eventos\n- Consulta de todos los eventos
 
 @enduml
 
 @startuml Flujo de Step Functions
-title Orquestación con AWS Step Functions
+title Orquestación con AWS Step Functions (con Fallback)
 
 participant "ProcessPaymentUseCase" as PPU
 participant "StepFunctionsService" as SFS
 participant "Step Function" as SF
-participant "ValidateTransaction" as VT
-participant "ProcessPayment" as PP
-participant "UpdateInventory" as UI
-participant "CompleteTransaction" as CT
-participant "CompensateTransaction" as Comp
+participant "WompiPaymentAdapter" as WPA
+participant "Wompi API" as Wompi
+participant "UpdateInventoryUseCase" as UIU
+participant "CompensateTransactionUseCase" as CTU
 
-== Flujo Exitoso ==
-
-PPU -> SFS: startExecution(paymentData)
-SFS -> SF: Start execution
-
-SF -> VT: Validate transaction
-VT -> VT: Check transaction exists
-VT --> SF: Valid
-
-SF -> PP: Process payment
-PP -> PP: Call Wompi API
-PP --> SF: Payment approved
-
-SF -> UI: Update inventory
-UI -> UI: Decrement quantity
-UI --> SF: Inventory updated
-
-SF -> CT: Complete transaction
-CT -> CT: Update status to APPROVED
-CT --> SF: Completed
-
-SF --> SFS: Execution succeeded
-SFS --> PPU: Success
-
-== Flujo con Error ==
+== Flujo con Step Function (Producción) ==
 
 PPU -> SFS: startExecution(paymentData)
 SFS -> SF: Start execution
 
-SF -> VT: Validate transaction
-VT --> SF: Valid
+SF -> WPA: createPayment(paymentToken, transactionData)
+WPA -> Wompi: GET /merchants/:public_key
+Wompi --> WPA: acceptance_token
+WPA -> WPA: calculateSignature()
+WPA -> Wompi: POST /transactions
+Wompi --> WPA: Payment Response
 
-SF -> PP: Process payment
-PP -> PP: Call Wompi API
-PP --> SF: Payment declined
+alt Pago PENDING (asíncrono)
+    SF -> PPU: pollPaymentStatus(wompiTransactionId)
+    loop Polling cada 10s hasta 2 minutos
+        PPU -> WPA: getPaymentStatus(wompiTransactionId)
+        WPA -> Wompi: GET /v1/transactions/:id
+        Wompi --> WPA: Payment Status
+        WPA --> PPU: Status Response
+        alt Status != PENDING
+            PPU -> PPU: Stop polling
+        end
+    end
+end
 
-SF -> Comp: Compensate transaction
-Comp -> Comp: Cancel transaction
-Comp -> Comp: Release inventory
-Comp --> SF: Compensated
+alt Pago Aprobado
+    SF -> UIU: execute(productId, quantity)
+    UIU -> UIU: Decrement inventory
+    UIU --> SF: Inventory updated
+    SF -> SF: Complete transaction (APPROVED)
+else Pago Declinado
+    SF -> CTU: execute(transactionId)
+    CTU -> CTU: Cancel transaction
+    CTU -> CTU: Compensate inventory
+    CTU --> SF: Compensated
+end
 
-SF --> SFS: Execution failed (compensated)
-SFS --> PPU: Error (with compensation)
+SF --> SFS: Execution completed
+SFS --> PPU: Success/Error
 
-note over SF, Comp: Step Functions garantiza:\n- Orquestación de pasos\n- Manejo de errores\n- Compensación automática
+== Flujo sin Step Function (Desarrollo) ==
+
+PPU -> SFS: startExecution(paymentData)
+SFS -> SFS: StateMachineDoesNotExist
+SFS --> PPU: Error (Step Function no encontrada)
+
+PPU -> PPU: executePaymentStep() (fallback)
+PPU -> WPA: createPayment(paymentToken, transactionData)
+WPA -> Wompi: GET /merchants/:public_key
+Wompi --> WPA: acceptance_token
+WPA -> WPA: calculateSignature()
+WPA -> Wompi: POST /transactions
+Wompi --> WPA: Payment Response
+
+alt Pago PENDING (asíncrono)
+    PPU -> PPU: pollPaymentStatus(wompiTransactionId)
+    loop Polling cada 10s hasta 2 minutos
+        PPU -> WPA: getPaymentStatus(wompiTransactionId)
+        WPA -> Wompi: GET /v1/transactions/:id
+        Wompi --> WPA: Payment Status
+        WPA --> PPU: Status Response
+        alt Status != PENDING
+            PPU -> PPU: Stop polling
+        end
+    end
+end
+
+alt Pago Aprobado
+    PPU -> UIU: execute(productId, quantity)
+    UIU -> UIU: Decrement inventory
+    UIU --> PPU: Inventory updated
+    PPU -> PPU: Complete transaction (APPROVED)
+else Pago Declinado
+    PPU -> CTU: execute(transactionId)
+    CTU -> CTU: Cancel transaction
+    CTU -> CTU: Compensate inventory
+    CTU --> PPU: Compensated
+end
+
+PPU --> PPU: Payment processed
+
+note over PPU, CTU: En desarrollo, si Step Function\nno está disponible, se ejecuta\ndirectamente el flujo de pago
+
+@enduml
+
+@startuml Endpoints de Consulta
+title Endpoints para Obtener Todos los Registros
+
+actor Usuario
+participant "EventStoreController" as ESC
+participant "GetAllEventsUseCase" as GAEU
+participant "InventoryController" as IC
+participant "GetAllInventoryUseCase" as GAIU
+participant "TransactionsController" as TC
+participant "GetAllTransactionsUseCase" as GATU
+participant "DynamoDB" as DB
+
+== Obtener Todos los Eventos ==
+
+Usuario -> ESC: GET /event-store
+ESC -> GAEU: execute()
+GAEU -> DB: SCAN event-store
+DB --> GAEU: All events
+GAEU -> GAEU: sort by timestamp (ascending)
+GAEU --> ESC: Events array
+ESC --> Usuario: All events from event-store
+
+== Obtener Todo el Inventario ==
+
+Usuario -> IC: GET /inventory
+IC -> GAIU: execute()
+GAIU -> DB: SCAN inventory
+DB --> GAIU: All inventory items
+GAIU --> IC: Inventory array
+IC --> Usuario: All inventory items
+
+== Obtener Todas las Transacciones ==
+
+Usuario -> TC: GET /transactions
+TC -> GATU: execute()
+GATU -> DB: SCAN transactions
+DB --> GATU: All transactions
+GATU -> GATU: sort by createdAt (descending)
+GATU --> TC: Transactions array
+TC --> Usuario: All transactions (most recent first)
+
+note over ESC, DB: Estos endpoints permiten:\n- Auditoría completa del sistema\n- Consulta de todos los registros\n- Análisis y debugging\n- Monitoreo del estado del sistema
 
 @enduml
