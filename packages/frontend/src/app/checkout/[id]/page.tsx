@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchTransaction, processPayment } from '@/store/slices/transaction-slice';
-import { Layout, Card, Typography, Button, Spin, Alert, Result, Space } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { Layout, Card, Typography, Button, Spin, Result, Space } from 'antd';
+import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, HomeOutlined } from '@ant-design/icons';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -27,8 +27,6 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     if (currentTransaction && currentTransaction.status === 'PENDING' && !processing) {
-      // In a real implementation, you would get the payment token from Wompi
-      // For now, we'll simulate it
       const handlePayment = async () => {
         setProcessing(true);
         try {
@@ -39,14 +37,13 @@ export default function CheckoutPage() {
               installments: 1,
             }),
           );
-          // Poll for transaction status
           let pollCount = 0;
-          const maxPolls = 15; // 30 seconds max (15 * 2 seconds)
-          
+          const maxPolls = 15;
+
           const interval = setInterval(async () => {
             pollCount++;
             await dispatch(fetchTransaction(transactionId));
-            
+
             if (pollCount >= maxPolls) {
               clearInterval(interval);
               setProcessing(false);
@@ -73,9 +70,14 @@ export default function CheckoutPage() {
 
   if (loading || !currentTransaction) {
     return (
-      <Layout style={{ minHeight: '100vh', padding: '20px' }}>
+      <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
         <Content style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-          <Spin size="large" />
+          <div className="processing-container">
+            <div className="processing-icon">
+              <Spin indicator={<LoadingOutlined style={{ fontSize: 48, color: '#722ed1' }} spin />} />
+            </div>
+            <Text style={{ marginTop: 24, fontSize: 16, color: '#6b7280' }}>Cargando transacción...</Text>
+          </div>
         </Content>
       </Layout>
     );
@@ -83,14 +85,32 @@ export default function CheckoutPage() {
 
   if (processing || currentTransaction.status === 'PENDING') {
     return (
-      <Layout style={{ minHeight: '100vh', padding: '20px' }}>
-        <Content style={{ maxWidth: '600px', margin: '0 auto' }}>
-          <Card>
-            <Result
-              icon={<Spin size="large" />}
-              title="Procesando Pago"
-              subTitle="Por favor espere mientras procesamos su pago..."
-            />
+      <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
+        <Content style={{ maxWidth: '600px', margin: '40px auto', padding: '0 20px' }}>
+          <Card className="checkout-card">
+            <div className="processing-container">
+              <div className="processing-icon" style={{ marginBottom: 24 }}>
+                <Spin indicator={<LoadingOutlined style={{ fontSize: 56, color: '#722ed1' }} spin />} />
+              </div>
+              <Title level={3} style={{ marginBottom: 8 }}>Procesando Pago</Title>
+              <Text style={{ fontSize: 15, color: '#6b7280' }}>
+                Por favor espere mientras procesamos su pago...
+              </Text>
+              <div style={{ marginTop: 32, display: 'flex', gap: 8, justifyContent: 'center' }}>
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      background: '#722ed1',
+                      animation: `pulse 1.4s ease-in-out ${i * 0.2}s infinite`,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
           </Card>
         </Content>
       </Layout>
@@ -100,37 +120,81 @@ export default function CheckoutPage() {
   const isSuccess = currentTransaction.status === 'APPROVED';
 
   return (
-    <Layout style={{ minHeight: '100vh', padding: '20px' }}>
-      <Content style={{ maxWidth: '600px', margin: '0 auto' }}>
-        <Card>
+    <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
+      <Content style={{ maxWidth: '600px', margin: '40px auto', padding: '0 20px' }}>
+        <Card className="checkout-card">
           <Result
-            icon={isSuccess ? <CheckCircleOutlined style={{ color: '#52c41a' }} /> : <CloseCircleOutlined style={{ color: '#ff4d4f' }} />}
-            title={isSuccess ? 'Pago Aprobado' : 'Pago Declinado'}
+            icon={
+              isSuccess ? (
+                <CheckCircleOutlined style={{ color: '#10b981', fontSize: 64 }} />
+              ) : (
+                <CloseCircleOutlined style={{ color: '#ef4444', fontSize: 64 }} />
+              )
+            }
+            title={
+              <span style={{ fontSize: 24, fontWeight: 700 }}>
+                {isSuccess ? 'Pago Aprobado' : 'Pago Declinado'}
+              </span>
+            }
             subTitle={
-              isSuccess
-                ? 'Su pago ha sido procesado exitosamente'
-                : currentTransaction.errorMessage || 'El pago no pudo ser procesado'
+              <span style={{ fontSize: 15, color: '#6b7280' }}>
+                {isSuccess
+                  ? 'Su pago ha sido procesado exitosamente'
+                  : currentTransaction.errorMessage || 'El pago no pudo ser procesado'}
+              </span>
             }
             extra={[
-              <Button type="primary" key="home" onClick={() => router.push('/')}>
+              <Button
+                type="primary"
+                key="home"
+                icon={<HomeOutlined />}
+                onClick={() => router.push('/')}
+                style={{
+                  background: 'linear-gradient(135deg, #722ed1 0%, #9333ea 100%)',
+                  border: 'none',
+                  fontWeight: 600,
+                  height: 44,
+                  paddingInline: 28,
+                }}
+              >
                 Volver a Productos
               </Button>,
             ]}
           >
-            <div style={{ marginTop: '24px', textAlign: 'left' }}>
-              <Title level={4}>Detalles de la Transacción</Title>
-              <Space direction="vertical" style={{ width: '100%' }}>
+            <div style={{
+              marginTop: 16,
+              textAlign: 'left',
+              background: '#f9fafb',
+              borderRadius: 12,
+              padding: 20,
+              border: '1px solid #e5e7eb',
+            }}>
+              <Title level={5} style={{ marginBottom: 16 }}>Detalles de la Transacción</Title>
+              <Space direction="vertical" style={{ width: '100%' }} size={10}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Text>ID de Transacción:</Text>
-                  <Text strong>{currentTransaction.id}</Text>
+                  <Text style={{ color: '#6b7280' }}>ID de Transacción:</Text>
+                  <Text strong style={{ fontFamily: 'monospace', fontSize: 13 }}>{currentTransaction.id}</Text>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Text>Estado:</Text>
-                  <Text strong>{currentTransaction.status}</Text>
+                  <Text style={{ color: '#6b7280' }}>Estado:</Text>
+                  <Text
+                    strong
+                    style={{
+                      color: isSuccess ? '#10b981' : '#ef4444',
+                      background: isSuccess ? '#ecfdf5' : '#fef2f2',
+                      padding: '2px 10px',
+                      borderRadius: 6,
+                      fontSize: 13,
+                    }}
+                  >
+                    {currentTransaction.status}
+                  </Text>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Text>Total:</Text>
-                  <Text strong>{formatPrice(currentTransaction.totalAmount)}</Text>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #e5e7eb', paddingTop: 10, marginTop: 4 }}>
+                  <Text style={{ color: '#6b7280' }}>Total:</Text>
+                  <Text strong style={{ fontSize: 18, color: '#722ed1' }}>
+                    {formatPrice(currentTransaction.totalAmount)}
+                  </Text>
                 </div>
               </Space>
             </div>

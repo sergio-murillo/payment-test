@@ -44,6 +44,8 @@ describe('ProductsController', () => {
 
   describe('getAllProducts', () => {
     it('should return all products', async () => {
+      const createdAt = new Date('2024-01-01T00:00:00.000Z');
+      const updatedAt = new Date('2024-01-01T00:00:00.000Z');
       const products = [
         new Product(
           'prod-001',
@@ -51,8 +53,11 @@ describe('ProductsController', () => {
           'Description 1',
           100000,
           'https://example.com/image1.jpg',
-          new Date(),
-          new Date(),
+          'Electrónica',
+          { marca: 'Test' },
+          4.5,
+          createdAt,
+          updatedAt,
         ),
       ];
 
@@ -64,7 +69,19 @@ describe('ProductsController', () => {
       const result = await controller.getAllProducts();
 
       expect(result.success).toBe(true);
-      expect(result.data).toEqual(products);
+      expect(result.data).toHaveLength(1);
+      expect(result.data?.[0]).toEqual({
+        id: 'prod-001',
+        name: 'Product 1',
+        description: 'Description 1',
+        price: 100000,
+        imageUrl: 'https://example.com/image1.jpg',
+        categoria: 'Electrónica',
+        metadata: { marca: 'Test' },
+        rating: 4.5,
+        createdAt: createdAt.toISOString(),
+        updatedAt: updatedAt.toISOString(),
+      });
     });
 
     it('should throw HttpException when use case fails', async () => {
@@ -79,14 +96,19 @@ describe('ProductsController', () => {
 
   describe('getProduct', () => {
     it('should return product by id', async () => {
+      const createdAt = new Date('2024-01-01T00:00:00.000Z');
+      const updatedAt = new Date('2024-01-01T00:00:00.000Z');
       const product = new Product(
         'prod-001',
         'Product 1',
         'Description 1',
         100000,
         'https://example.com/image1.jpg',
-        new Date(),
-        new Date(),
+        'Electrónica',
+        { marca: 'Test Brand' },
+        4.5,
+        createdAt,
+        updatedAt,
       );
 
       getProductUseCase.execute.mockResolvedValue({
@@ -97,7 +119,18 @@ describe('ProductsController', () => {
       const result = await controller.getProduct('prod-001');
 
       expect(result.success).toBe(true);
-      expect(result.data).toEqual(product);
+      expect(result.data).toEqual({
+        id: 'prod-001',
+        name: 'Product 1',
+        description: 'Description 1',
+        price: 100000,
+        imageUrl: 'https://example.com/image1.jpg',
+        categoria: 'Electrónica',
+        metadata: { marca: 'Test Brand' },
+        rating: 4.5,
+        createdAt: createdAt.toISOString(),
+        updatedAt: updatedAt.toISOString(),
+      });
       expect(getProductUseCase.execute).toHaveBeenCalledWith('prod-001');
     });
 

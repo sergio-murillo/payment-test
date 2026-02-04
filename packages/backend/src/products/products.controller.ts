@@ -4,6 +4,7 @@ import {
   Param,
   HttpStatus,
   HttpException,
+  Inject,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -19,6 +20,9 @@ import {
   ApiResponseDto,
   ApiErrorResponseDto,
 } from '../shared/dto/api-response.dto';
+import { Product } from './domain/product.entity';
+import { InventoryRepository } from '../inventory/domain/inventory.repository';
+import { INVENTORY_REPOSITORY_TOKEN } from '../inventory/inventory.tokens';
 
 @ApiTags('products')
 @Controller('products')
@@ -26,7 +30,35 @@ export class ProductsController {
   constructor(
     private readonly getProductUseCase: GetProductUseCase,
     private readonly getAllProductsUseCase: GetAllProductsUseCase,
+    @Inject(INVENTORY_REPOSITORY_TOKEN)
+    private readonly inventoryRepository: InventoryRepository,
   ) {}
+
+  private async toResponseDto(product: Product): Promise<ProductResponseDto> {
+    let stock = 0;
+    try {
+      const inventory = await this.inventoryRepository.findByProductId(product.id);
+      if (inventory) {
+        stock = inventory.getAvailableQuantity();
+      }
+    } catch {
+      // If inventory lookup fails, default to 0
+    }
+
+    return {
+      id: product.id,
+      name: product.name,
+      description: product.description,
+      price: product.price,
+      imageUrl: product.imageUrl,
+      categoria: product.categoria,
+      metadata: product.metadata,
+      rating: product.rating,
+      stock,
+      createdAt: product.createdAt.toISOString(),
+      updatedAt: product.updatedAt.toISOString(),
+    };
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get all products' })
@@ -59,9 +91,13 @@ export class ProductsController {
       );
     }
 
+    const data = await Promise.all(
+      (result.data || []).map((product) => this.toResponseDto(product)),
+    );
+
     return {
       success: true,
-      data: result.data,
+      data,
     };
   }
 
@@ -101,7 +137,7 @@ export class ProductsController {
 
     return {
       success: true,
-      data: result.data,
+      data: result.data ? await this.toResponseDto(result.data) : undefined,
     };
   }
 }

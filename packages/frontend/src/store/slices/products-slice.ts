@@ -7,6 +7,10 @@ export interface Product {
   description: string;
   price: number;
   imageUrl: string;
+  categoria: string;
+  metadata: Record<string, any>;
+  rating: number;
+  stock: number;
   createdAt: string;
   updatedAt: string;
 }

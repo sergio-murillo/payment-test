@@ -1,9 +1,12 @@
 'use client';
 
 import { Card, Typography, Button } from 'antd';
+import { ShoppingCartOutlined, TagOutlined } from '@ant-design/icons';
 import Image from 'next/image';
+import { useState } from 'react';
 import { Product } from '@/store/slices/products-slice';
 import { useOptimizedImage } from '@/hooks/use-optimized-image';
+import { StarRating } from './star-rating';
 
 const { Title, Text } = Typography;
 
@@ -13,6 +16,8 @@ interface ProductCardProps {
 }
 
 export function ProductCard({ product, onClick }: ProductCardProps) {
+  const [imageLoaded, setImageLoaded] = useState(false);
+
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('es-CO', {
       style: 'currency',
@@ -21,41 +26,75 @@ export function ProductCard({ product, onClick }: ProductCardProps) {
     }).format(price);
   };
 
-  // Optimizar imagen para card (small size, altura 200px)
-  // Usamos dimensiones personalizadas para mantener la proporción del card
   const optimizedImageUrl = useOptimizedImage(
     product.imageUrl,
     'small',
-    { width: 400, height: 200 }, // Ancho más grande para mantener calidad en cards
+    { width: 400, height: 220 },
   );
 
   return (
     <Card
       hoverable
+      className="product-card"
       cover={
-        <div style={{ position: 'relative', width: '100%', height: '200px' }}>
+        <div style={{ position: 'relative', width: '100%', height: '220px', background: '#f9fafb' }}>
+          {!imageLoaded && <div className="skeleton-image" style={{ position: 'absolute', inset: 0, zIndex: 1 }} />}
           <Image
             src={optimizedImageUrl}
             alt={product.name}
             fill
-            style={{ objectFit: 'contain' }}
+            style={{ objectFit: 'cover', opacity: imageLoaded ? 1 : 0, transition: 'opacity 0.4s ease' }}
+            onLoad={() => setImageLoaded(true)}
           />
+          {product.categoria && (
+            <span
+              className="category-badge"
+              style={{ position: 'absolute', top: 12, left: 12, zIndex: 2 }}
+            >
+              <TagOutlined style={{ fontSize: 10 }} />
+              {product.categoria}
+            </span>
+          )}
         </div>
       }
       actions={[
-        <Button type="primary" block onClick={onClick} key="buy">
+        <Button
+          type="primary"
+          block
+          onClick={onClick}
+          key="buy"
+          icon={<ShoppingCartOutlined />}
+          style={{
+            background: 'linear-gradient(135deg, #722ed1 0%, #9333ea 100%)',
+            border: 'none',
+            fontWeight: 600,
+          }}
+        >
           Ver Detalles
         </Button>,
       ]}
     >
-      <Title level={4}>{product.name}</Title>
-      <Text type="secondary" ellipsis>
+      <Title level={4} style={{ marginBottom: 4, fontSize: 16 }}>{product.name}</Title>
+      <Text type="secondary" ellipsis style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
         {product.description}
       </Text>
-      <div style={{ marginTop: '12px' }}>
-        <Text strong style={{ fontSize: '18px', color: '#722ed1' }}>
-          {formatPrice(product.price)}
-        </Text>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <StarRating rating={product.rating || 1} size={13} />
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: product.stock > 5 ? '#10b981' : product.stock > 0 ? '#f59e0b' : '#ef4444',
+            background: product.stock > 5 ? '#ecfdf5' : product.stock > 0 ? '#fffbeb' : '#fef2f2',
+            padding: '2px 8px',
+            borderRadius: 6,
+          }}
+        >
+          {product.stock > 0 ? `${product.stock} disponibles` : 'Agotado'}
+        </span>
+      </div>
+      <div className="price-tag">
+        {formatPrice(product.price)}
       </div>
     </Card>
   );

@@ -94,6 +94,18 @@ functions:
 
 resources:
   Resources:
+    # ProductsTable: Tabla DynamoDB para productos
+    # Campos de la entidad Product:
+    # - id (String): ID único del producto (clave primaria)
+    # - name (String): Nombre del producto
+    # - description (String): Descripción del producto
+    # - price (Number): Precio en centavos
+    # - imageUrl (String): URL de la imagen
+    # - categoria (String): Categoría del producto (indexado en GSI)
+    # - metadata (Map): Metadatos adicionales del producto
+    # - rating (Number): Valoración del producto (1-5)
+    # - createdAt (String): Fecha de creación (ISO 8601)
+    # - updatedAt (String): Fecha de actualización (ISO 8601)
     ProductsTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -102,9 +114,18 @@ resources:
         AttributeDefinitions:
           - AttributeName: id
             AttributeType: S
+          - AttributeName: categoria
+            AttributeType: S
         KeySchema:
           - AttributeName: id
             KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: categoria-index
+            KeySchema:
+              - AttributeName: categoria
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
         StreamSpecification:
           StreamViewType: NEW_AND_OLD_IMAGES
 

@@ -127,10 +127,20 @@ def main():
             "TableName": "dev-products",
             "BillingMode": "PAY_PER_REQUEST",
             "AttributeDefinitions": [
-                {"AttributeName": "id", "AttributeType": "S"}
+                {"AttributeName": "id", "AttributeType": "S"},
+                {"AttributeName": "categoria", "AttributeType": "S"}
             ],
             "KeySchema": [
                 {"AttributeName": "id", "KeyType": "HASH"}
+            ],
+            "GlobalSecondaryIndexes": [
+                {
+                    "IndexName": "categoria-index",
+                    "KeySchema": [
+                        {"AttributeName": "categoria", "KeyType": "HASH"}
+                    ],
+                    "Projection": {"ProjectionType": "ALL"}
+                }
             ]
         },
         {

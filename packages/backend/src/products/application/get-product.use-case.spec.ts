@@ -50,6 +50,9 @@ describe('GetProductUseCase', () => {
       'Test Description',
       100000,
       'https://example.com/image.jpg',
+      'Electrónica',
+      { marca: 'Test Brand' },
+      4.5,
       new Date(),
       new Date(),
     );

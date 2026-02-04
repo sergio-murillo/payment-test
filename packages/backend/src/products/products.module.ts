@@ -4,10 +4,11 @@ import { GetProductUseCase } from './application/get-product.use-case';
 import { GetAllProductsUseCase } from './application/get-all-products.use-case';
 import { DynamoDbProductRepository } from './infrastructure/dynamodb-product.repository';
 import { SharedModule } from '../shared/shared.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { PRODUCT_REPOSITORY_TOKEN } from './products.tokens';
 
 @Module({
-  imports: [SharedModule],
+  imports: [SharedModule, InventoryModule],
   controllers: [ProductsController],
   providers: [
     GetProductUseCase,

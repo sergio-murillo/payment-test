@@ -8,6 +8,10 @@ const mockProduct: Product = {
   description: 'Test Description',
   price: 100000,
   imageUrl: 'https://example.com/image.jpg',
+  categoria: 'Electrónica',
+  metadata: { marca: 'Test' },
+  rating: 4.5,
+  stock: 50,
   createdAt: '2024-01-01T00:00:00Z',
   updatedAt: '2024-01-01T00:00:00Z',
 };

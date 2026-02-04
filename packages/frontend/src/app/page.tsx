@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchProducts } from '@/store/slices/products-slice';
 import { ProductCard } from '@/components/product-card';
-import { Layout, Spin, Alert } from 'antd';
+import { ProductCardSkeletonGrid } from '@/components/product-card-skeleton';
+import { Layout, Alert } from 'antd';
+import { ShopOutlined } from '@ant-design/icons';
 
 const { Content } = Layout;
 
@@ -22,20 +24,10 @@ export default function Home() {
     router.push(`/product/${productId}`);
   };
 
-  if (loading) {
-    return (
-      <Layout style={{ minHeight: '100vh', padding: '20px' }}>
-        <Content style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-          <Spin size="large" />
-        </Content>
-      </Layout>
-    );
-  }
-
   if (error) {
     return (
-      <Layout style={{ minHeight: '100vh', padding: '20px' }}>
-        <Content>
+      <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
+        <Content style={{ padding: '20px' }}>
           <Alert message="Error" description={error} type="error" showIcon />
         </Content>
       </Layout>
@@ -43,27 +35,35 @@ export default function Home() {
   }
 
   return (
-    <Layout style={{ minHeight: '100vh', padding: '20px' }}>
-      <Content>
-        <h1 style={{ marginBottom: '24px', textAlign: 'center' }}>
-          Productos Disponibles
-        </h1>
+    <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
+      <Content style={{ padding: '0 20px 40px' }}>
+        <div className="page-header">
+          <h1>
+            <ShopOutlined style={{ marginRight: 12 }} />
+            Productos Disponibles
+          </h1>
+          <p>Encuentra los mejores productos con los mejores precios</p>
+        </div>
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: '20px',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+            gap: '24px',
             maxWidth: '1200px',
             margin: '0 auto',
           }}
         >
-          {products.map((product) => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              onClick={() => handleProductClick(product.id)}
-            />
-          ))}
+          {loading ? (
+            <ProductCardSkeletonGrid count={6} />
+          ) : (
+            products.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                onClick={() => handleProductClick(product.id)}
+              />
+            ))
+          )}
         </div>
       </Content>
     </Layout>

@@ -6,8 +6,10 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchProduct } from '@/store/slices/products-slice';
 import { createTransaction } from '@/store/slices/transaction-slice';
 import { ProductDetails } from '@/components/product-details';
-import { PaymentModal } from '@/components/payment-modal';
-import { Layout, Spin, Alert } from 'antd';
+import { ProductDetailSkeleton } from '@/components/product-detail-skeleton';
+import { PaymentForm } from '@/components/payment-form';
+import { Layout, Alert, Button } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
 import { v4 as uuidv4 } from 'uuid';
 
 const { Content } = Layout;
@@ -18,7 +20,7 @@ export default function ProductPage() {
   const dispatch = useAppDispatch();
   const { products, loading } = useAppSelector((state) => state.products);
   const { currentTransaction } = useAppSelector((state) => state.transaction);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [step, setStep] = useState<'detail' | 'payment'>('detail');
 
   const productId = params.id as string;
   const product = products.find((p) => p.id === productId);
@@ -30,13 +32,19 @@ export default function ProductPage() {
   }, [productId, product, dispatch]);
 
   const handlePayClick = () => {
-    setShowPaymentModal(true);
+    setStep('payment');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleBackToDetail = () => {
+    setStep('detail');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handlePaymentSubmit = async (paymentData: any) => {
     const idempotencyKey = uuidv4();
-    const commission = product!.price * 0.03; // 3% commission
-    const shippingCost = 15000; // Fixed shipping cost
+    const commission = product!.price * 0.03;
+    const shippingCost = 15000;
 
     await dispatch(
       createTransaction({
@@ -53,15 +61,17 @@ export default function ProductPage() {
       }),
     );
 
-    setShowPaymentModal(false);
     router.push(`/checkout/${currentTransaction?.id}`);
   };
 
   if (loading) {
     return (
-      <Layout style={{ minHeight: '100vh', padding: '20px' }}>
-        <Content style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-          <Spin size="large" />
+      <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
+        <Content style={{ padding: '20px 20px 40px' }}>
+          <div style={{ maxWidth: 800, margin: '0 auto', marginBottom: 20 }}>
+            <div className="skeleton" style={{ width: 120, height: 36, borderRadius: 10 }} />
+          </div>
+          <ProductDetailSkeleton />
         </Content>
       </Layout>
     );
@@ -69,26 +79,42 @@ export default function ProductPage() {
 
   if (!product) {
     return (
-      <Layout style={{ minHeight: '100vh', padding: '20px' }}>
+      <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
+        <Content style={{ padding: '20px' }}>
+          <Alert message="Error" description="Producto no encontrado" type="error" showIcon />
+        </Content>
+      </Layout>
+    );
+  }
+
+  if (step === 'payment') {
+    return (
+      <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
         <Content>
-          <Alert message="Error" description="Product not found" type="error" showIcon />
+          <PaymentForm
+            product={product}
+            onSubmit={handlePaymentSubmit}
+            onBack={handleBackToDetail}
+          />
         </Content>
       </Layout>
     );
   }
 
   return (
-    <Layout style={{ minHeight: '100vh', padding: '20px' }}>
-      <Content>
+    <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
+      <Content style={{ padding: '20px 20px 40px' }}>
+        <div style={{ maxWidth: 800, margin: '0 auto 20px' }}>
+          <Button
+            type="text"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => router.push('/')}
+            style={{ fontWeight: 600, color: '#722ed1' }}
+          >
+            Volver a productos
+          </Button>
+        </div>
         <ProductDetails product={product} onPayClick={handlePayClick} />
-        {showPaymentModal && (
-          <PaymentModal
-            visible={showPaymentModal}
-            onCancel={() => setShowPaymentModal(false)}
-            onSubmit={handlePaymentSubmit}
-            product={product}
-          />
-        )}
       </Content>
     </Layout>
   );
