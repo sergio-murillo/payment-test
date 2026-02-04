@@ -1,0 +1,373 @@
+@startuml Flujo Completo de Pago
+title Flujo Completo de Pago - Cliente a Wompi
+
+actor Cliente
+participant Frontend
+participant "ProductsController" as PC
+participant "GetProductUseCase" as GPU
+participant "ProductRepository" as PR
+participant "TransactionsController" as TC
+participant "CreateTransactionUseCase" as CTU
+participant "TransactionRepository" as TR
+participant "EventStoreService" as ES
+participant "PaymentsController" as PayC
+participant "ProcessPaymentUseCase" as PPU
+participant "StepFunctionsService" as SFS
+participant "WompiPaymentAdapter" as WPA
+participant "Wompi API" as Wompi
+participant "UpdateInventoryUseCase" as UIU
+participant "InventoryRepository" as IR
+participant "SnsService" as SNS
+
+== Visualización de Producto ==
+Cliente -> Frontend: Accede a página de producto
+Frontend -> PC: GET /products/:id
+PC -> GPU: execute(productId)
+GPU -> PR: findById(productId)
+PR --> GPU: Product
+GPU --> PC: Result<Product>
+PC --> Frontend: Product data
+Frontend --> Cliente: Muestra producto
+
+== Creación de Transacción ==
+Cliente -> Frontend: Completa formulario de pago
+Frontend -> TC: POST /transactions
+TC -> CTU: execute(dto)
+CTU -> TR: findByIdempotencyKey(key)
+alt Transacción ya existe
+    TR --> CTU: Existing Transaction
+    CTU --> TC: Result (existing)
+else Nueva transacción
+    TR --> CTU: null
+    CTU -> CTU: create Transaction (PENDING)
+    CTU -> TR: save(transaction)
+    CTU -> ES: storeEvent(TransactionCreated)
+    CTU --> TC: Result (new transaction)
+end
+TC --> Frontend: Transaction created
+Frontend --> Cliente: Redirige a checkout
+
+== Procesamiento de Pago ==
+Cliente -> Frontend: Confirma pago
+Frontend -> PayC: POST /payments/process
+PayC -> PPU: execute(paymentDto)
+PPU -> TR: findById(transactionId)
+TR --> PPU: Transaction
+PPU -> SFS: startExecution(paymentData)
+SFS -> SFS: Step Function iniciada
+PPU --> PayC: Execution ARN
+PayC --> Frontend: Payment processing started
+
+== Step Function: Procesar Pago ==
+SFS -> WPA: createPayment(paymentData)
+WPA -> Wompi: POST /transactions
+Wompi --> WPA: Payment Response
+WPA --> SFS: Payment Result
+
+alt Pago Aprobado
+    SFS -> TR: update(transaction.approve())
+    SFS -> ES: storeEvent(PaymentProcessed)
+    SFS -> SNS: publish(PaymentProcessed)
+    SFS -> UIU: execute(productId, quantity)
+    UIU -> IR: decrement(productId, quantity)
+    note right of IR: Actualización atómica\ncon condición de carrera
+    IR --> UIU: Updated Inventory
+    UIU -> ES: storeEvent(InventoryUpdated)
+    UIU --> SFS: Success
+    SFS -> TR: update(transaction.complete())
+else Pago Declinado
+    SFS -> TR: update(transaction.decline())
+    SFS -> ES: storeEvent(PaymentDeclined)
+    SFS -> SNS: publish(PaymentDeclined)
+    SFS -> "CompensateTransactionUseCase": execute(transactionId)
+    note right of "CompensateTransactionUseCase": Operación de compensación
+end
+
+== Consulta de Estado ==
+Frontend -> TC: GET /transactions/:id (polling)
+TC -> TR: findById(transactionId)
+TR --> TC: Transaction
+TC --> Frontend: Transaction status
+Frontend --> Cliente: Muestra resultado
+
+@enduml
+
+@startuml Flujo de Actualización de Inventario con Condiciones de Carrera
+title Manejo de Condiciones de Carrera en Inventario
+
+participant "UpdateInventoryUseCase" as UIU
+participant "InventoryRepository" as IR
+participant "DynamoDB" as DB
+participant "EventStoreService" as ES
+
+== Escenario: Múltiples Actualizaciones Concurrentes ==
+
+par Transacción 1
+    UIU -> IR: decrement(productId, 1)
+    IR -> DB: UPDATE inventory\nSET quantity = quantity - :qty\nWHERE quantity >= :qty
+    DB --> IR: Success
+    IR -> DB: GET inventory
+    DB --> IR: Updated Inventory
+    IR --> UIU: Inventory (qty: 49)
+    UIU -> ES: storeEvent(InventoryUpdated)
+end
+
+par Transacción 2 (Concurrente)
+    UIU -> IR: decrement(productId, 1)
+    IR -> DB: UPDATE inventory\nSET quantity = quantity - :qty\nWHERE quantity >= :qty
+    note right of DB: Condición verifica\ncantidad disponible
+    DB --> IR: Success
+    IR -> DB: GET inventory
+    DB --> IR: Updated Inventory
+    IR --> UIU: Inventory (qty: 48)
+    UIU -> ES: storeEvent(InventoryUpdated)
+end
+
+note over DB: DynamoDB garantiza atomicidad\nmediante transacciones condicionales
+
+@enduml
+
+@startuml Flujo de Compensación (Saga Pattern)
+title Operación de Compensación - Rollback de Transacción
+
+participant "Step Function" as SF
+participant "CompensateTransactionUseCase" as CTU
+participant "TransactionRepository" as TR
+participant "InventoryRepository" as IR
+participant "EventStoreService" as ES
+participant "SnsService" as SNS
+participant "DynamoDB" as DB
+
+== Escenario: Error en Procesamiento de Pago ==
+
+SF -> SF: Error en procesamiento
+SF -> CTU: execute(transactionId)
+
+CTU -> TR: findById(transactionId)
+TR --> CTU: Transaction
+
+CTU -> TR: update(transaction.cancel())
+TR -> DB: UPDATE transaction\nSET status = CANCELLED
+DB --> TR: Success
+
+CTU -> IR: release(productId, quantity)
+IR -> DB: UPDATE inventory\nSET reservedQuantity = reservedQuantity - :qty
+note right of DB: Libera inventario reservado
+DB --> IR: Success
+IR --> CTU: Updated Inventory
+
+CTU -> ES: storeEvent(TransactionCompensated)
+ES -> DB: PUT event-store
+DB --> ES: Success
+
+CTU -> SNS: publish(TransactionCompensated)
+SNS --> CTU: Published
+
+CTU --> SF: Compensation completed
+
+note over SF, DB: Todas las operaciones se revierten\npara mantener consistencia
+
+@enduml
+
+@startuml Flujo de Idempotencia
+title Garantía de Idempotencia en Transacciones
+
+actor Cliente
+participant Frontend
+participant "CreateTransactionUseCase" as CTU
+participant "TransactionRepository" as TR
+participant "DynamoDB" as DB
+
+== Escenario: Reintento de Petición ==
+
+Cliente -> Frontend: Envía formulario de pago
+Frontend -> CTU: createTransaction(dto)\nidempotencyKey: "abc-123"
+
+CTU -> TR: findByIdempotencyKey("abc-123")
+TR -> DB: QUERY transactions\nBY idempotencyKey-index
+DB --> TR: Transaction exists
+TR --> CTU: Existing Transaction
+
+CTU --> Frontend: Result (existing transaction)
+note right of CTU: No se crea duplicado\nSe retorna transacción existente
+
+== Escenario: Primera Petición ==
+
+Cliente -> Frontend: Envía formulario de pago
+Frontend -> CTU: createTransaction(dto)\nidempotencyKey: "xyz-789"
+
+CTU -> TR: findByIdempotencyKey("xyz-789")
+TR -> DB: QUERY transactions\nBY idempotencyKey-index
+DB --> TR: null (not found)
+TR --> CTU: null
+
+CTU -> CTU: create new Transaction
+CTU -> TR: save(transaction)
+TR -> DB: PUT transaction
+DB --> TR: Success
+TR --> CTU: Saved
+
+CTU --> Frontend: Result (new transaction)
+
+@enduml
+
+@startuml Flujo Frontend - Redux y API
+title Interacción Frontend con Backend usando Redux
+
+actor Usuario
+participant "React Component" as Component
+participant "Redux Store" as Store
+participant "Redux Thunk" as Thunk
+participant "API Client" as API
+participant "Backend API" as Backend
+
+== Carga de Productos ==
+
+Usuario -> Component: Visita página principal
+Component -> Store: dispatch(fetchProducts())
+Store -> Thunk: fetchProducts()
+Thunk -> API: GET /products
+API -> Backend: HTTP GET /products
+Backend --> API: Products array
+API --> Thunk: Response data
+Thunk -> Store: productsSlice.fulfilled(products)
+Store --> Component: State updated
+Component --> Usuario: Renderiza productos
+
+== Creación de Transacción ==
+
+Usuario -> Component: Completa formulario de pago
+Component -> Store: dispatch(createTransaction(data))
+Store -> Thunk: createTransaction(data)
+Thunk -> API: POST /transactions
+API -> Backend: HTTP POST /transactions
+Backend --> API: Transaction created
+API --> Thunk: Transaction data
+Thunk -> Store: transactionSlice.fulfilled(transaction)
+Store --> Component: State updated
+Component -> Component: router.push('/checkout/:id')
+
+== Procesamiento de Pago ==
+
+Usuario -> Component: Confirma pago en checkout
+Component -> Store: dispatch(processPayment(data))
+Store -> Thunk: processPayment(data)
+Thunk -> API: POST /payments/process
+API -> Backend: HTTP POST /payments/process
+Backend --> API: Execution started
+API --> Thunk: Execution ARN
+
+loop Polling de estado
+    Thunk -> API: GET /transactions/:id
+    API -> Backend: HTTP GET /transactions/:id
+    Backend --> API: Transaction status
+    API --> Thunk: Transaction data
+    Thunk -> Store: transactionSlice.fulfilled(transaction)
+    
+    alt Transaction status != PENDING
+        Thunk -> Store: Stop polling
+    end
+end
+
+Store --> Component: State updated
+Component --> Usuario: Muestra resultado del pago
+
+@enduml
+
+@startuml Flujo de Event Store y Auditoría
+title Event Sourcing y Auditoría
+
+participant "Use Case" as UC
+participant "EventStoreService" as ES
+participant "DynamoDB" as DB
+participant "SnsService" as SNS
+participant "SNS Topic" as Topic
+participant "Subscribers" as Subs
+
+== Almacenamiento de Evento ==
+
+UC -> ES: storeEvent(eventData)
+ES -> ES: create Event entity
+ES -> DB: PUT event-store\naggregateId + eventTimestamp
+note right of DB: Evento almacenado\npara auditoría
+DB --> ES: Success
+ES --> UC: Event stored
+
+== Publicación de Evento ==
+
+UC -> SNS: publish(event)
+SNS -> Topic: Publish message
+Topic -> Subs: Notify subscribers
+note right of Subs: Múltiples suscriptores\npueden procesar el evento
+
+== Consulta de Eventos ==
+
+UC -> ES: getEventsByAggregateId(id)
+ES -> DB: QUERY event-store\nBY aggregateId
+DB --> ES: Events array
+ES -> ES: sort by timestamp
+ES --> UC: Events history
+
+note over UC, DB: Event Store permite:\n- Auditoría completa\n- Reconstrucción de estado\n- Análisis de eventos
+
+@enduml
+
+@startuml Flujo de Step Functions
+title Orquestación con AWS Step Functions
+
+participant "ProcessPaymentUseCase" as PPU
+participant "StepFunctionsService" as SFS
+participant "Step Function" as SF
+participant "ValidateTransaction" as VT
+participant "ProcessPayment" as PP
+participant "UpdateInventory" as UI
+participant "CompleteTransaction" as CT
+participant "CompensateTransaction" as Comp
+
+== Flujo Exitoso ==
+
+PPU -> SFS: startExecution(paymentData)
+SFS -> SF: Start execution
+
+SF -> VT: Validate transaction
+VT -> VT: Check transaction exists
+VT --> SF: Valid
+
+SF -> PP: Process payment
+PP -> PP: Call Wompi API
+PP --> SF: Payment approved
+
+SF -> UI: Update inventory
+UI -> UI: Decrement quantity
+UI --> SF: Inventory updated
+
+SF -> CT: Complete transaction
+CT -> CT: Update status to APPROVED
+CT --> SF: Completed
+
+SF --> SFS: Execution succeeded
+SFS --> PPU: Success
+
+== Flujo con Error ==
+
+PPU -> SFS: startExecution(paymentData)
+SFS -> SF: Start execution
+
+SF -> VT: Validate transaction
+VT --> SF: Valid
+
+SF -> PP: Process payment
+PP -> PP: Call Wompi API
+PP --> SF: Payment declined
+
+SF -> Comp: Compensate transaction
+Comp -> Comp: Cancel transaction
+Comp -> Comp: Release inventory
+Comp --> SF: Compensated
+
+SF --> SFS: Execution failed (compensated)
+SFS --> PPU: Error (with compensation)
+
+note over SF, Comp: Step Functions garantiza:\n- Orquestación de pasos\n- Manejo de errores\n- Compensación automática
+
+@enduml
