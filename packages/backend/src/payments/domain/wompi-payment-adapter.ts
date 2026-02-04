@@ -57,6 +57,7 @@ export interface WompiPaymentResponse {
     reference: string;
     created_at: string;
     finalized_at?: string;
+    status_message?: string;
   };
 }
 
@@ -71,5 +72,6 @@ export interface WompiPaymentStatus {
     reference: string;
     created_at: string;
     finalized_at?: string;
+    status_message?: string;
   };
 }

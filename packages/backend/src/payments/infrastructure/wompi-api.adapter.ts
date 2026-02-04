@@ -239,7 +239,7 @@ export class WompiApiAdapter implements WompiPaymentAdapter {
         `/transactions/${transactionId}`,
         {
           headers: {
-            Authorization: `Bearer ${this.privateKey}`,
+            Authorization: `Bearer ${this.publicKey}`,
           },
         },
       );

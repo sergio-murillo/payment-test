@@ -136,4 +136,26 @@ export class Transaction {
       this.wompiTransactionId,
     );
   }
+
+  setWompiTransactionId(wompiTransactionId: string): Transaction {
+    return new Transaction(
+      this.id,
+      this.productId,
+      this.amount,
+      this.commission,
+      this.shippingCost,
+      this.totalAmount,
+      this.status,
+      this.customerEmail,
+      this.customerName,
+      this.deliveryAddress,
+      this.deliveryCity,
+      this.deliveryPhone,
+      this.idempotencyKey,
+      this.createdAt,
+      new Date(),
+      wompiTransactionId,
+      this.errorMessage,
+    );
+  }
 }

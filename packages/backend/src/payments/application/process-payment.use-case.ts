@@ -235,43 +235,84 @@ export class ProcessPaymentUseCase {
         publicKey,
       });
 
-      // Update transaction
-      let updatedTransaction: any;
-      if (wompiResponse.data.status === 'APPROVED') {
-        updatedTransaction = transaction.approve(wompiResponse.data.id);
-      } else {
-        updatedTransaction = transaction.decline(
-          `Payment declined: ${wompiResponse.data.status}`,
-        );
+      const wompiTransactionId = wompiResponse.data.id;
+
+      // If payment is already in final state, update transaction immediately
+      if (wompiResponse.data.status !== 'PENDING') {
+        let updatedTransaction: any;
+        if (wompiResponse.data.status === 'APPROVED') {
+          updatedTransaction = transaction.approve(wompiTransactionId);
+        } else if (
+          ['DECLINED', 'VOIDED', 'ERROR'].includes(wompiResponse.data.status)
+        ) {
+          updatedTransaction = transaction.decline(
+            wompiResponse.data.status_message ||
+              `Payment ${wompiResponse.data.status.toLowerCase()}`,
+          );
+        }
+
+        if (updatedTransaction) {
+          await this.transactionRepository.update(updatedTransaction);
+
+          // Store event
+          await this.eventStoreService.storeEvent({
+            aggregateId: transaction.id,
+            eventType: 'PaymentProcessed',
+            eventData: {
+              transactionId: transaction.id,
+              wompiTransactionId,
+              status: wompiResponse.data.status,
+            },
+            timestamp: new Date(),
+          });
+
+          // Publish to SNS
+          await this.snsService.publish({
+            eventType: 'PaymentProcessed',
+            transactionId: transaction.id,
+            status: wompiResponse.data.status,
+            wompiTransactionId,
+          });
+
+          return {
+            success: true,
+            data: {
+              transaction: updatedTransaction,
+              wompiResponse: wompiResponse.data,
+            },
+          };
+        }
       }
 
-      await this.transactionRepository.update(updatedTransaction);
+      // If payment is PENDING, save wompiTransactionId and start polling
+      this.logger.debug(
+        `Payment created with status PENDING, saving wompiTransactionId and starting polling for transaction: ${wompiTransactionId}`,
+        'ProcessPaymentUseCase',
+      );
 
-      // Store event
-      await this.eventStoreService.storeEvent({
-        aggregateId: transaction.id,
-        eventType: 'PaymentProcessed',
-        eventData: {
-          transactionId: transaction.id,
-          wompiTransactionId: wompiResponse.data.id,
-          status: wompiResponse.data.status,
+      // Save wompiTransactionId to transaction for polling
+      const transactionWithWompiId =
+        transaction.setWompiTransactionId(wompiTransactionId);
+      await this.transactionRepository.update(transactionWithWompiId);
+
+      // Start polling in background (non-blocking)
+      this.pollPaymentStatus(transactionId, wompiTransactionId).catch(
+        (error) => {
+          this.logger.error(
+            `Error in payment polling for transaction ${transactionId}`,
+            error instanceof Error ? error.stack : String(error),
+            'ProcessPaymentUseCase',
+          );
         },
-        timestamp: new Date(),
-      });
+      );
 
-      // Publish to SNS
-      await this.snsService.publish({
-        eventType: 'PaymentProcessed',
-        transactionId: transaction.id,
-        status: wompiResponse.data.status,
-        wompiTransactionId: wompiResponse.data.id,
-      });
-
+      // Return immediately with PENDING status
       return {
         success: true,
         data: {
-          transaction: updatedTransaction,
+          transaction,
           wompiResponse: wompiResponse.data,
+          status: 'PENDING',
         },
       };
     } catch (error) {
@@ -286,5 +327,136 @@ export class ProcessPaymentUseCase {
         error: 'Failed to execute payment step',
       };
     }
+  }
+
+  /**
+   * Hace polling del estado de la transacción en Wompi hasta que cambie de PENDING
+   * o se alcance el tiempo máximo configurado
+   */
+  private async pollPaymentStatus(
+    transactionId: string,
+    wompiTransactionId: string,
+  ): Promise<void> {
+    const pollingInterval = this.configService.get<number>(
+      'PAYMENT_POLLING_INTERVAL_MS',
+      10000,
+    ); // Default 10 seconds
+    const maxDuration = this.configService.get<number>(
+      'PAYMENT_POLLING_MAX_DURATION_MS',
+      120000,
+    ); // Default 2 minutes
+
+    const startTime = Date.now();
+    let pollCount = 0;
+
+    this.logger.debug(
+      `Starting payment status polling for Wompi transaction: ${wompiTransactionId}`,
+      'ProcessPaymentUseCase',
+    );
+
+    while (Date.now() - startTime < maxDuration) {
+      try {
+        pollCount++;
+        await new Promise((resolve) => setTimeout(resolve, pollingInterval));
+
+        const statusResponse =
+          await this.wompiAdapter.getPaymentStatus(wompiTransactionId);
+
+        const status = statusResponse.data.status;
+
+        this.logger.debug(
+          `Poll ${pollCount}: Payment status for ${wompiTransactionId} is ${status}`,
+          'ProcessPaymentUseCase',
+        );
+
+        // If status is no longer PENDING, update transaction and continue workflow
+        if (status !== 'PENDING') {
+          this.logger.debug(
+            `Payment status changed to ${status}, updating transaction and continuing workflow`,
+            'ProcessPaymentUseCase',
+          );
+
+          const transaction =
+            await this.transactionRepository.findById(transactionId);
+
+          if (!transaction) {
+            this.logger.error(
+              `Transaction ${transactionId} not found during polling`,
+              'ProcessPaymentUseCase',
+            );
+            return;
+          }
+
+          let updatedTransaction: any;
+          if (status === 'APPROVED') {
+            updatedTransaction = transaction.approve(wompiTransactionId);
+          } else if (['DECLINED', 'VOIDED', 'ERROR'].includes(status)) {
+            updatedTransaction = transaction.decline(
+              statusResponse.data.status_message ||
+                `Payment ${status.toLowerCase()}`,
+            );
+          }
+
+          if (updatedTransaction) {
+            await this.transactionRepository.update(updatedTransaction);
+
+            // Store event
+            await this.eventStoreService.storeEvent({
+              aggregateId: transaction.id,
+              eventType: 'PaymentProcessed',
+              eventData: {
+                transactionId: transaction.id,
+                wompiTransactionId,
+                status,
+              },
+              timestamp: new Date(),
+            });
+
+            // Publish to SNS
+            await this.snsService.publish({
+              eventType: 'PaymentProcessed',
+              transactionId: transaction.id,
+              status,
+              wompiTransactionId,
+            });
+
+            // Continue workflow: Update Inventory if approved
+            if (status === 'APPROVED') {
+              const inventoryResult = await this.updateInventoryUseCase.execute(
+                transaction.productId,
+                1, // Assuming 1 unit per transaction
+              );
+
+              if (!inventoryResult.success) {
+                this.logger.error(
+                  `Inventory update failed for transaction ${transaction.id} after payment approval, compensating`,
+                  'ProcessPaymentUseCase',
+                );
+                await this.compensateTransactionUseCase.execute(transaction.id);
+              }
+            }
+
+            this.logger.debug(
+              `Payment polling completed. Final status: ${status}`,
+              'ProcessPaymentUseCase',
+            );
+            return;
+          }
+        }
+      } catch (error) {
+        this.logger.error(
+          `Error polling payment status (attempt ${pollCount})`,
+          error instanceof Error ? error.stack : String(error),
+          'ProcessPaymentUseCase',
+        );
+        // Continue polling despite errors
+      }
+    }
+
+    // Timeout reached
+    this.logger.warn(
+      `Payment polling timeout reached for transaction ${transactionId} (Wompi ID: ${wompiTransactionId}) after ${maxDuration}ms`,
+      'ProcessPaymentUseCase',
+    );
   }
 }

@@ -106,18 +106,53 @@ export class DynamoDbInventoryRepository implements InventoryRepository {
 
   async decrement(productId: string, quantity: number): Promise<Inventory> {
     try {
+      // Check if inventory exists first
+      const current = await this.findByProductId(productId);
+      if (!current) {
+        throw new Error(`Inventory not found for product: ${productId}`);
+      }
+
+      // Check if there's enough quantity
+      if (current.quantity < quantity) {
+        throw new Error(
+          `Insufficient inventory. Available: ${current.quantity}, Requested: ${quantity}`,
+        );
+      }
+
       // Atomic decrement with condition
-      await this.dynamoDb.update(
-        'inventory',
-        { productId },
-        'SET quantity = quantity - :quantity, reservedQuantity = reservedQuantity - :quantity, updatedAt = :updatedAt',
-        {
-          ':quantity': quantity,
-          ':updatedAt': new Date().toISOString(),
-        },
-        undefined,
-        'quantity >= :quantity AND reservedQuantity >= :quantity',
-      );
+      // If reservedQuantity exists and is >= quantity, decrement both
+      // Otherwise, only decrement quantity (for direct sales without reservation)
+      const hasReservedQuantity =
+        current.reservedQuantity !== undefined &&
+        current.reservedQuantity >= quantity;
+
+      if (hasReservedQuantity) {
+        // Decrement both quantity and reservedQuantity
+        await this.dynamoDb.update(
+          'inventory',
+          { productId },
+          'SET quantity = quantity - :quantity, reservedQuantity = reservedQuantity - :quantity, updatedAt = :updatedAt',
+          {
+            ':quantity': quantity,
+            ':updatedAt': new Date().toISOString(),
+          },
+          undefined,
+          'quantity >= :quantity AND reservedQuantity >= :quantity',
+        );
+      } else {
+        // Only decrement quantity (reservedQuantity is 0 or doesn't exist)
+        await this.dynamoDb.update(
+          'inventory',
+          { productId },
+          'SET quantity = quantity - :quantity, updatedAt = :updatedAt',
+          {
+            ':quantity': quantity,
+            ':updatedAt': new Date().toISOString(),
+          },
+          undefined,
+          'quantity >= :quantity',
+        );
+      }
 
       const updated = await this.findByProductId(productId);
       if (!updated) {
