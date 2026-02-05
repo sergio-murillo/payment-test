@@ -6,7 +6,7 @@ const mockDispatch = jest.fn().mockReturnValue({ unwrap: () => Promise.resolve()
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
-  useParams: () => ({ id: 'prod-001' }),
+  usePathname: () => '/product/prod-001',
 }));
 
 jest.mock('@/store/hooks', () => ({

@@ -192,6 +192,10 @@ describe('ProcessPaymentUseCase', () => {
         transactionId: 'trans-001',
         paymentToken: 'tok_test_1234567890',
         installments: 1,
+        productId: 'prod-001',
+        totalAmount: 118000,
+        currency: 'COP',
+        customerEmail: 'test@example.com',
       });
     });
 
@@ -1279,6 +1283,183 @@ describe('ProcessPaymentUseCase', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Failed to execute payment step');
+    });
+  });
+
+  describe('executePaymentStep with waitForPolling=true', () => {
+    beforeEach(() => {
+      configService.get.mockImplementation(
+        (key: string, defaultValue?: any) => {
+          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          if (key === 'PAYMENT_POLLING_INTERVAL_MS') return 1;
+          if (key === 'PAYMENT_POLLING_MAX_DURATION_MS') return 10000;
+          return defaultValue;
+        },
+      );
+    });
+
+    it('should wait for polling and return updated transaction when approved', async () => {
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      const approvedTransaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.APPROVED,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+        'wompi-trans-123',
+      );
+
+      // First call for initial findById, second for after polling
+      transactionRepository.findById
+        .mockResolvedValueOnce(transaction)
+        .mockResolvedValueOnce(transaction)
+        .mockResolvedValueOnce(approvedTransaction);
+
+      wompiAdapter.createPayment.mockResolvedValue({
+        data: {
+          id: 'wompi-trans-123',
+          status: 'PENDING',
+          amount_in_cents: 11800000,
+          currency: 'COP',
+          customer_email: 'test@example.com',
+          payment_method_type: 'CARD',
+          reference: 'trans-001',
+          created_at: new Date().toISOString(),
+        },
+      });
+
+      transactionRepository.update.mockResolvedValue(undefined);
+
+      // Polling returns APPROVED
+      (wompiAdapter as any).getPaymentStatus.mockResolvedValue({
+        data: {
+          id: 'wompi-trans-123',
+          status: 'APPROVED',
+          amount_in_cents: 11800000,
+          currency: 'COP',
+          customer_email: 'test@example.com',
+          payment_method_type: 'CARD',
+          reference: 'trans-001',
+          created_at: new Date().toISOString(),
+        },
+      });
+
+      eventStore.storeEvent.mockResolvedValue(undefined);
+      snsService.publish.mockResolvedValue(undefined);
+      updateInventoryUseCase.execute.mockResolvedValue({
+        success: true,
+        data: {},
+      });
+
+      const result = await useCase.executePaymentStep(
+        'trans-001',
+        'token-123',
+        1,
+        true, // waitForPolling = true
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data?.status).toBe(TransactionStatus.APPROVED);
+      expect(result.data?.transaction?.status).toBe(TransactionStatus.APPROVED);
+    });
+
+    it('should return error when transaction not found after polling', async () => {
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      // First call returns transaction, polling findById returns transaction, after polling returns null
+      transactionRepository.findById
+        .mockResolvedValueOnce(transaction)
+        .mockResolvedValueOnce(transaction)
+        .mockResolvedValueOnce(null);
+
+      wompiAdapter.createPayment.mockResolvedValue({
+        data: {
+          id: 'wompi-trans-123',
+          status: 'PENDING',
+          amount_in_cents: 11800000,
+          currency: 'COP',
+          customer_email: 'test@example.com',
+          payment_method_type: 'CARD',
+          reference: 'trans-001',
+          created_at: new Date().toISOString(),
+        },
+      });
+
+      transactionRepository.update.mockResolvedValue(undefined);
+
+      // Polling returns APPROVED
+      (wompiAdapter as any).getPaymentStatus.mockResolvedValue({
+        data: {
+          id: 'wompi-trans-123',
+          status: 'APPROVED',
+          amount_in_cents: 11800000,
+          currency: 'COP',
+          customer_email: 'test@example.com',
+          payment_method_type: 'CARD',
+          reference: 'trans-001',
+          created_at: new Date().toISOString(),
+        },
+      });
+
+      eventStore.storeEvent.mockResolvedValue(undefined);
+      snsService.publish.mockResolvedValue(undefined);
+      updateInventoryUseCase.execute.mockResolvedValue({
+        success: true,
+        data: {},
+      });
+
+      const result = await useCase.executePaymentStep(
+        'trans-001',
+        'token-123',
+        1,
+        true, // waitForPolling = true
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Transaction not found after polling');
     });
   });
 
