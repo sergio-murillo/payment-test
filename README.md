@@ -2,6 +2,13 @@
 
 Aplicación fullstack para procesamiento de pagos, desarrollada con NestJS, Next.js, y arquitectura serverless en AWS.
 
+## 🌐 URLs de Producción
+
+| Servicio | URL |
+|---|---|
+| **Frontend** | https://d2iz29zdtykupj.cloudfront.net/ |
+| **Backend API** | https://j4fq1wg98a.execute-api.us-east-1.amazonaws.com/dev |
+
 ## 📋 Tabla de Contenidos
 
 - [Características](#características)
