@@ -130,5 +130,159 @@ describe('Inventory Entity', () => {
 
       expect(() => inventory.decrement(20)).toThrow('Insufficient inventory');
     });
+
+    it('should handle decrementing exact quantity', () => {
+      const inventory = new Inventory('prod-001', 100, 10, new Date());
+
+      const decremented = inventory.decrement(100);
+
+      expect(decremented.quantity).toBe(0);
+      expect(decremented.reservedQuantity).toBe(10);
+    });
+
+    it('should handle decrementing zero quantity', () => {
+      const inventory = new Inventory('prod-001', 100, 10, new Date());
+
+      const decremented = inventory.decrement(0);
+
+      expect(decremented.quantity).toBe(100);
+      expect(decremented.reservedQuantity).toBe(10);
+    });
+  });
+
+  describe('fromPersistence edge cases', () => {
+    it('should handle null reservedQuantity', () => {
+      const data = {
+        productId: 'prod-001',
+        quantity: 100,
+        reservedQuantity: null,
+        updatedAt: '2024-01-01T00:00:00.000Z',
+      };
+
+      const inventory = Inventory.fromPersistence(data);
+
+      expect(inventory.reservedQuantity).toBe(0);
+    });
+
+    it('should handle undefined reservedQuantity', () => {
+      const data = {
+        productId: 'prod-001',
+        quantity: 100,
+        updatedAt: '2024-01-01T00:00:00.000Z',
+      };
+
+      const inventory = Inventory.fromPersistence(data);
+
+      expect(inventory.reservedQuantity).toBe(0);
+    });
+
+    it('should handle zero reservedQuantity', () => {
+      const data = {
+        productId: 'prod-001',
+        quantity: 100,
+        reservedQuantity: 0,
+        updatedAt: '2024-01-01T00:00:00.000Z',
+      };
+
+      const inventory = Inventory.fromPersistence(data);
+
+      expect(inventory.reservedQuantity).toBe(0);
+    });
+  });
+
+  describe('reserve edge cases', () => {
+    it('should handle reserving zero quantity', () => {
+      const inventory = new Inventory('prod-001', 100, 10, new Date());
+
+      const reserved = inventory.reserve(0);
+
+      expect(reserved.reservedQuantity).toBe(10);
+      expect(reserved.quantity).toBe(100);
+    });
+
+    it('should handle reserving exact available quantity', () => {
+      const inventory = new Inventory('prod-001', 100, 10, new Date());
+
+      const reserved = inventory.reserve(90);
+
+      expect(reserved.reservedQuantity).toBe(100);
+      expect(reserved.quantity).toBe(100);
+    });
+
+    it('should throw error when reserving more than available by 1', () => {
+      const inventory = new Inventory('prod-001', 100, 10, new Date());
+
+      expect(() => inventory.reserve(91)).toThrow('Insufficient inventory');
+    });
+  });
+
+  describe('release edge cases', () => {
+    it('should handle releasing zero quantity', () => {
+      const inventory = new Inventory('prod-001', 100, 30, new Date());
+
+      const released = inventory.release(0);
+
+      expect(released.reservedQuantity).toBe(30);
+      expect(released.quantity).toBe(100);
+    });
+
+    it('should handle releasing exact reserved quantity', () => {
+      const inventory = new Inventory('prod-001', 100, 30, new Date());
+
+      const released = inventory.release(30);
+
+      expect(released.reservedQuantity).toBe(0);
+      expect(released.quantity).toBe(100);
+    });
+
+    it('should throw error when trying to release more than reserved by 1', () => {
+      const inventory = new Inventory('prod-001', 100, 5, new Date());
+
+      expect(() => inventory.release(6)).toThrow(
+        'Cannot release more than reserved',
+      );
+    });
+  });
+
+  describe('getAvailableQuantity edge cases', () => {
+    it('should return correct value when quantity equals reserved', () => {
+      const inventory = new Inventory('prod-001', 100, 100, new Date());
+
+      expect(inventory.getAvailableQuantity()).toBe(0);
+    });
+
+    it('should return correct value when reserved is zero', () => {
+      const inventory = new Inventory('prod-001', 100, 0, new Date());
+
+      expect(inventory.getAvailableQuantity()).toBe(100);
+    });
+
+    it('should return correct value when reserved exceeds quantity', () => {
+      const inventory = new Inventory('prod-001', 50, 60, new Date());
+
+      expect(inventory.getAvailableQuantity()).toBe(-10);
+    });
+  });
+
+  describe('toPersistence edge cases', () => {
+    it('should handle zero values correctly', () => {
+      const inventory = new Inventory('prod-001', 0, 0, new Date('2024-01-01'));
+
+      const data = inventory.toPersistence();
+
+      expect(data.quantity).toBe(0);
+      expect(data.reservedQuantity).toBe(0);
+      expect(data.productId).toBe('prod-001');
+    });
+
+    it('should preserve date format in ISO string', () => {
+      const date = new Date('2024-01-01T12:00:00.000Z');
+      const inventory = new Inventory('prod-001', 100, 10, date);
+
+      const data = inventory.toPersistence();
+
+      expect(data.updatedAt).toBe(date.toISOString());
+      expect(new Date(data.updatedAt).getTime()).toBe(date.getTime());
+    });
   });
 });

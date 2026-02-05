@@ -102,4 +102,18 @@ describe('GetAllProductsUseCase', () => {
     expect(result.error).toBe('Failed to get products');
     expect(logger.error).toHaveBeenCalled();
   });
+
+  it('should handle non-Error exceptions', async () => {
+    repository.findAll.mockRejectedValue('string error');
+
+    const result = await useCase.execute();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Failed to get products');
+    expect(logger.error).toHaveBeenCalledWith(
+      'Error getting all products',
+      'string error',
+      'GetAllProductsUseCase',
+    );
+  });
 });
