@@ -15,6 +15,7 @@ Aplicación fullstack para procesamiento de pagos, desarrollada con NestJS, Next
 - [Despliegue](#despliegue)
 - [API Documentation](#api-documentation)
 - [Modelo de Datos](#modelo-de-datos)
+- [Seguridad - OWASP Top 10](#-seguridad---cumplimiento-owasp-top-10)
 
 ## ✨ Características
 
@@ -198,7 +199,9 @@ cp packages/backend/env.example packages/backend/.env
 
 # Frontend
 cp packages/frontend/env.example packages/frontend/.env
-cp packages/frontend/env.example packages/frontend/.env.local
+
+# Docker
+cp packages/frontend/env.example packages/.env
 ```
 
 4. **Iniciar servicios con Docker Compose**
@@ -485,10 +488,204 @@ Attributes:
   - timestamp
 ```
 
-## 🔒 Seguridad
+## 🔒 Seguridad - Cumplimiento OWASP Top 10
 
-- ✅ Validación de datos con class-validator
-- ✅ HTTPS en producción
-- ✅ Headers de seguridad (CORS configurado)
-- ✅ Variables de entorno para credenciales
-- ✅ Idempotencia para prevenir duplicados
+La aplicación implementa controles de seguridad alineados con el [OWASP Top 10 (2021)](https://owasp.org/Top10/). A continuación se detalla cada categoría:
+
+### A01: Broken Access Control
+
+| Control | Estado | Detalle |
+|---|---|---|
+| CORS configurado | ✅ | Origen restringido vía `FRONTEND_URL` (`main.ts`) |
+| Rutas protegidas por método HTTP | ✅ | Controladores con decoradores `@Get`, `@Post` específicos |
+| Principio de mínimo privilegio (IAM) | ✅ | Políticas IAM en `serverless.yml` con recursos específicos por tabla/ARN |
+
+**Implementación:**
+```typescript
+// main.ts
+app.enableCors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true,
+});
+```
+
+---
+
+### A02: Cryptographic Failures
+
+| Control | Estado | Detalle |
+|---|---|---|
+| Firma de integridad SHA256 | ✅ | Hash HMAC para validar transacciones Wompi (`wompi-api.adapter.ts`) |
+| Secretos en variables de entorno | ✅ | `WOMPI_PRIVATE_KEY`, `WOMPI_INTEGRITY_SECRET` nunca en código fuente |
+| No almacenamiento de datos de tarjeta | ✅ | Tokenización vía API Wompi; datos sensibles no persisten |
+
+**Implementación:**
+```typescript
+// wompi-api.adapter.ts
+private calculateSignature(reference: string, amountInCents: number, currency: string): string {
+  const dataToSign = `${reference}${amountInCents}${currency}${this.integritySecret}`;
+  return crypto.createHash('sha256').update(dataToSign).digest('hex');
+}
+```
+
+---
+
+### A03: Injection
+
+| Control | Estado | Detalle |
+|---|---|---|
+| Validación con class-validator | ✅ | DTOs con `@IsString`, `@IsNotEmpty`, `@IsEmail`, `@Matches`, `@Length`, `@Min` |
+| ValidationPipe global | ✅ | `whitelist: true`, `forbidNonWhitelisted: true`, `transform: true` |
+| Queries parametrizadas DynamoDB | ✅ | `ExpressionAttributeValues` con placeholders (`:value`) en todas las consultas |
+
+**Implementación:**
+```typescript
+// main.ts - ValidationPipe global
+app.useGlobalPipes(new ValidationPipe({
+  whitelist: true,              // Elimina propiedades no declaradas en el DTO
+  forbidNonWhitelisted: true,   // Rechaza requests con propiedades extra
+  transform: true,              // Transforma payloads a instancias del DTO
+}));
+```
+
+```typescript
+// process-payment.dto.ts - Ejemplo de validación
+@IsString()
+@IsNotEmpty()
+@Matches(/^\d{16}$/)
+cardNumber: string;
+
+@IsString()
+@Length(3, 4)
+cvv: string;
+```
+
+---
+
+### A04: Insecure Design
+
+| Control | Estado | Detalle |
+|---|---|---|
+| Idempotencia | ✅ | `idempotencyKey` con GSI en DynamoDB; previene pagos duplicados |
+| Patrón SAGA con compensación | ✅ | Step Functions con estado `CompensateTransaction` ante fallos |
+| Dead Letter Queue (DLQ) | ✅ | SQS DLQ con `maxReceiveCount: 3` para mensajes fallidos |
+| Manejo de condiciones de carrera | ✅ | Operaciones atómicas de inventario con `ConditionExpression` |
+
+**Implementación:**
+```typescript
+// create-transaction.use-case.ts - Idempotencia
+const existingTransaction = await this.transactionRepository.findByIdempotencyKey(dto.idempotencyKey);
+if (existingTransaction) {
+  return { success: true, data: existingTransaction };
+}
+```
+
+```yaml
+# serverless.yml - SAGA Pattern con compensación
+"ProcessPayment":
+  "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "CompensateTransaction" }]
+"UpdateInventory":
+  "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "CompensateTransaction" }]
+```
+
+---
+
+### A05: Security Misconfiguration
+
+| Control | Estado | Detalle |
+|---|---|---|
+| Variables de entorno | ✅ | Configuración vía `ConfigService` y `.env` files |
+| Configuración por ambiente | ✅ | Diferentes configs para dev/prod (logs, endpoints, CORS) |
+| Exclusión de archivos sensibles | ✅ | `package.patterns` en serverless excluye todo excepto `dist/**` |
+| DynamoDB endpoint configurable | ✅ | Local en desarrollo, AWS en producción |
+
+---
+
+### A06: Vulnerable and Outdated Components
+
+| Control | Estado | Detalle |
+|---|---|---|
+| Dependencias actualizadas | ✅ | AWS SDK v3, NestJS, Next.js 14, Axios 1.6+ |
+| Librerías de seguridad dedicadas | ✅ | `class-validator`, `class-transformer`, `pino` |
+| Node.js runtime moderno | ✅ | Node.js 20.x en producción (serverless.yml) |
+
+---
+
+### A07: Identification and Authentication Failures
+
+| Control | Estado | Detalle |
+|---|---|---|
+| API Keys separadas por responsabilidad | ✅ | `publicKey` para tokenización, `privateKey` para pagos |
+| Bearer Token Authentication | ✅ | Headers `Authorization: Bearer` en todas las llamadas a Wompi |
+| Credenciales inyectadas por ConfigService | ✅ | Nunca hardcodeadas en código fuente |
+
+---
+
+### A08: Software and Data Integrity Failures
+
+| Control | Estado | Detalle |
+|---|---|---|
+| Verificación de firma de integridad | ✅ | SHA256 hash con `integritySecret` en cada transacción de pago |
+| Event Store (Event Sourcing) | ✅ | Registro inmutable de todos los cambios de estado de transacciones |
+| Eventos de compensación auditados | ✅ | `TransactionCompensated` registrado en Event Store |
+
+**Implementación:**
+```typescript
+// compensate-transaction.use-case.ts - Auditoría de compensación
+await this.eventStoreService.storeEvent({
+  aggregateId: transaction.id,
+  eventType: 'TransactionCompensated',
+  eventData: { transactionId, reason: 'Payment processing failed' },
+  timestamp: new Date(),
+});
+```
+
+---
+
+### A09: Security Logging and Monitoring Failures
+
+| Control | Estado | Detalle |
+|---|---|---|
+| Logging estructurado con Pino | ✅ | JSON en producción, pretty-print en desarrollo |
+| Niveles de log configurables | ✅ | `LOG_LEVEL` via variable de entorno (debug, info, warn, error) |
+| Logging contextual | ✅ | Cada log incluye `context` del módulo/servicio |
+| Stack traces en errores 5xx | ✅ | `HttpExceptionFilter` registra traza completa |
+| Warnings en errores 4xx | ✅ | Errores de cliente logueados como warnings |
+| Event Store como auditoría | ✅ | Registro de todos los eventos del dominio |
+
+**Implementación:**
+```typescript
+// http-exception.filter.ts - Logging diferenciado por severidad
+if (status >= 500) {
+  this.logger.error(`${request.method} ${request.url}`, exception.stack, 'HttpExceptionFilter');
+} else {
+  this.logger.warn(`${request.method} ${request.url} ${status}`, 'HttpExceptionFilter');
+}
+```
+
+---
+
+### A10: Server-Side Request Forgery (SSRF)
+
+| Control | Estado | Detalle |
+|---|---|---|
+| URLs de API fijas por configuración | ✅ | `WOMPI_API_URL` desde variable de entorno, no de input del usuario |
+| Axios con baseURL fija | ✅ | Instancia con URL base predefinida, sin URLs dinámicas |
+| Frontend con API endpoint fijo | ✅ | `NEXT_PUBLIC_API_URL` configurado en build time |
+
+---
+
+### Resumen de Cumplimiento
+
+| Categoría OWASP | Estado |
+|---|---|
+| A01: Broken Access Control | ✅ Implementado |
+| A02: Cryptographic Failures | ✅ Implementado |
+| A03: Injection | ✅ Implementado |
+| A04: Insecure Design | ✅ Implementado |
+| A05: Security Misconfiguration | ✅ Implementado |
+| A06: Vulnerable Components | ✅ Implementado |
+| A07: Authentication Failures | ✅ Implementado |
+| A08: Data Integrity Failures | ✅ Implementado |
+| A09: Logging & Monitoring | ✅ Implementado |
+| A10: SSRF | ✅ Implementado |
