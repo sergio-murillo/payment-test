@@ -88,11 +88,19 @@ export class ProcessPaymentUseCase {
         process.env.IS_OFFLINE === 'true';
 
       try {
-        const executionArn = await this.stepFunctionsService.startExecution({
+        // Prepare all data needed for Step Function execution
+        const stepFunctionInput = {
           transactionId: transaction.id,
           paymentToken: paymentToken,
           installments: dto.installments,
-        });
+          productId: transaction.productId,
+          totalAmount: transaction.totalAmount,
+          currency: 'COP',
+          customerEmail: transaction.customerEmail,
+        };
+
+        const executionArn =
+          await this.stepFunctionsService.startExecution(stepFunctionInput);
 
         this.logger.debug(
           `Step Function execution started: ${executionArn}`,
@@ -200,15 +208,20 @@ export class ProcessPaymentUseCase {
     }
   }
 
-  async executePaymentStep(
+  /**
+   * Executes the payment step (can be called from Step Functions handlers)
+   * @public
+   * @param waitForPolling - If true, waits for polling to complete (for Step Functions). If false, starts polling in background (for direct execution)
+   */
+  public async executePaymentStep(
     transactionId: string,
     paymentToken: string,
     installments: number,
+    waitForPolling: boolean = false,
   ): Promise<Result<any>> {
     try {
       const transaction =
         await this.transactionRepository.findById(transactionId);
-
       if (!transaction) {
         return {
           success: false,
@@ -220,7 +233,6 @@ export class ProcessPaymentUseCase {
         'WOMPI_PUBLIC_KEY',
         'pub_stagtest_g2u0HQd3ZMh05hsSgTS2lUV8t3s4mOt7',
       );
-
       // Create payment in Wompi
       const wompiResponse = await this.wompiAdapter.createPayment({
         amountInCents: transaction.totalAmount * 100,
@@ -295,26 +307,56 @@ export class ProcessPaymentUseCase {
         transaction.setWompiTransactionId(wompiTransactionId);
       await this.transactionRepository.update(transactionWithWompiId);
 
-      // Start polling in background (non-blocking)
-      this.pollPaymentStatus(transactionId, wompiTransactionId).catch(
-        (error) => {
-          this.logger.error(
-            `Error in payment polling for transaction ${transactionId}`,
-            error instanceof Error ? error.stack : String(error),
-            'ProcessPaymentUseCase',
-          );
-        },
-      );
+      // If waitForPolling is true (Step Functions context), wait for polling to complete
+      // Otherwise, start polling in background (non-blocking) for direct execution
+      if (waitForPolling) {
+        this.logger.debug(
+          `Waiting for payment polling to complete for transaction: ${wompiTransactionId}`,
+          'ProcessPaymentUseCase',
+        );
+        await this.pollPaymentStatus(transactionId, wompiTransactionId);
 
-      // Return immediately with PENDING status
-      return {
-        success: true,
-        data: {
-          transaction,
-          wompiResponse: wompiResponse.data,
-          status: 'PENDING',
-        },
-      };
+        // After polling completes, get the updated transaction
+        const updatedTransaction =
+          await this.transactionRepository.findById(transactionId);
+
+        if (!updatedTransaction) {
+          return {
+            success: false,
+            error: 'Transaction not found after polling',
+          };
+        }
+
+        return {
+          success: true,
+          data: {
+            transaction: updatedTransaction,
+            wompiResponse: wompiResponse.data,
+            status: updatedTransaction.status,
+          },
+        };
+      } else {
+        // Start polling in background (non-blocking) for direct execution
+        this.pollPaymentStatus(transactionId, wompiTransactionId).catch(
+          (error) => {
+            this.logger.error(
+              `Error in payment polling for transaction ${transactionId}`,
+              error instanceof Error ? error.stack : String(error),
+              'ProcessPaymentUseCase',
+            );
+          },
+        );
+
+        // Return immediately with PENDING status
+        return {
+          success: true,
+          data: {
+            transaction,
+            wompiResponse: wompiResponse.data,
+            status: 'PENDING',
+          },
+        };
+      }
     } catch (error) {
       this.logger.error(
         'Error executing payment step',

@@ -4,11 +4,11 @@ frameworkVersion: '3'
 
 provider:
   name: aws
-  runtime: nodejs18.x
+  runtime: nodejs20.x
   region: us-east-1
   stage: ${opt:stage, 'dev'}
   memorySize: 512
-  timeout: 30
+  timeout: 300
   environment:
     STAGE: ${self:provider.stage}
     REGION: ${self:provider.region}
@@ -23,6 +23,7 @@ provider:
     PAYMENT_POLLING_INTERVAL_MS: ${env:PAYMENT_POLLING_INTERVAL_MS, '10000'}
     PAYMENT_POLLING_MAX_DURATION_MS: ${env:PAYMENT_POLLING_MAX_DURATION_MS, '120000'}
     FRONTEND_URL: ${env:FRONTEND_URL, 'd2iz29zdtykupj.cloudfront.net'}
+    LOG_LEVEL: ${env:LOG_LEVEL, 'debug'}
   iam:
     role:
       statements:
@@ -81,6 +82,7 @@ custom:
       - PAYMENT_POLLING_INTERVAL_MS
       - PAYMENT_POLLING_MAX_DURATION_MS
       - FRONTEND_URL
+      - LOG_LEVEL
 
 functions:
   api:
@@ -97,19 +99,19 @@ functions:
 
   validateTransaction:
     handler: dist/payments/lambdas/step-functions-handlers.validateTransactionHandler
-    timeout: 30
+    timeout: 300
 
   processPayment:
     handler: dist/payments/lambdas/step-functions-handlers.processPaymentHandler
-    timeout: 30
+    timeout: 300
 
   updateInventory:
     handler: dist/payments/lambdas/step-functions-handlers.updateInventoryHandler
-    timeout: 30
+    timeout: 300
 
   compensateTransaction:
     handler: dist/payments/lambdas/step-functions-handlers.compensateTransactionHandler
-    timeout: 30
+    timeout: 300
 
 resources:
   Resources:

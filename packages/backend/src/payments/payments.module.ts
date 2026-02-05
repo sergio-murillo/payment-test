@@ -26,6 +26,10 @@ import { WOMPI_PAYMENT_ADAPTER_TOKEN } from './payments.tokens';
       useClass: WompiApiAdapter,
     },
   ],
-  exports: [WOMPI_PAYMENT_ADAPTER_TOKEN, CompensateTransactionUseCase],
+  exports: [
+    WOMPI_PAYMENT_ADAPTER_TOKEN,
+    ProcessPaymentUseCase,
+    CompensateTransactionUseCase,
+  ],
 })
 export class PaymentsModule {}
