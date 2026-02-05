@@ -229,10 +229,7 @@ export class ProcessPaymentUseCase {
         };
       }
 
-      const publicKey = this.configService.get<string>(
-        'WOMPI_PUBLIC_KEY',
-        'pub_stagtest_g2u0HQd3ZMh05hsSgTS2lUV8t3s4mOt7',
-      );
+      const publicKey = this.configService.get<string>('WOMPI_PUBLIC_KEY', '');
       // Create payment in Wompi
       const wompiResponse = await this.wompiAdapter.createPayment({
         amountInCents: transaction.totalAmount * 100,

@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "wompi-payments-api",
 		"name": "Wompi Payments API",
-		"description": "Colección completa de endpoints para la API de Wompi Payments",
+		"description": "Colección completa de endpoints para la API de Wompi Payments.\n\n## Flujo de uso recomendado\n1. **Get All Products** → ver productos disponibles\n2. **Create Transaction** → crear transacción (guarda automáticamente el `transaction_id`)\n3. **Process Payment** → procesar pago (usa el `transaction_id` guardado)\n4. **Get Transaction by ID** → verificar estado de la transacción\n5. **Get All Inventory** → verificar que el stock se actualizó\n6. **Get All Events** → auditar eventos generados",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
 		"_exporter_id": "wompi-payments"
 	},
@@ -72,20 +72,13 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/products/:id",
+							"raw": "{{base_url}}/products/{{product_id}}",
 							"host": [
 								"{{base_url}}"
 							],
 							"path": [
 								"products",
-								":id"
-							],
-							"variable": [
-								{
-									"key": "id",
-									"value": "prod-001",
-									"description": "ID del producto"
-								}
+								"{{product_id}}"
 							]
 						},
 						"description": "Obtiene un producto específico por su ID. Incluye información de stock disponible."
@@ -167,6 +160,28 @@
 								],
 								"type": "text/javascript"
 							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Transaction created successfully', function () {",
+									"    pm.response.to.have.status(201);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    pm.expect(jsonData.data).to.have.property('id');",
+									"    pm.expect(jsonData.data.status).to.eql('PENDING');",
+									"});",
+									"",
+									"// Guardar transaction_id para usar en requests posteriores",
+									"var jsonData = pm.response.json();",
+									"if (jsonData.success && jsonData.data && jsonData.data.id) {",
+									"    pm.environment.set('transaction_id', jsonData.data.id);",
+									"    console.log('Transaction ID saved: ' + jsonData.data.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
 						}
 					],
 					"request": {
@@ -179,7 +194,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"productId\": \"prod-001\",\n    \"amount\": 4500000,\n    \"commission\": 135000,\n    \"shippingCost\": 15000,\n    \"customerEmail\": \"cliente@ejemplo.com\",\n    \"customerName\": \"Juan Pérez\",\n    \"deliveryAddress\": \"Calle 123 #45-67\",\n    \"deliveryCity\": \"Bogotá\",\n    \"deliveryPhone\": \"+57 300 123 4567\",\n    \"idempotencyKey\": \"{{idempotency_key}}\"\n}",
+							"raw": "{\n    \"productId\": \"{{product_id}}\",\n    \"amount\": 4500000,\n    \"commission\": 135000,\n    \"shippingCost\": 15000,\n    \"customerEmail\": \"cliente@ejemplo.com\",\n    \"customerName\": \"Juan Pérez\",\n    \"deliveryAddress\": \"Calle 123 #45-67\",\n    \"deliveryCity\": \"Bogotá\",\n    \"deliveryPhone\": \"+57 300 123 4567\",\n    \"idempotencyKey\": \"{{idempotency_key}}\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -195,7 +210,7 @@
 								"transactions"
 							]
 						},
-						"description": "Crea una nueva transacción en estado PENDING. El idempotencyKey garantiza que no se dupliquen transacciones."
+						"description": "Crea una nueva transacción en estado PENDING. El idempotencyKey garantiza que no se dupliquen transacciones.\n\n**Nota:** El `transaction_id` se guarda automáticamente en las variables de entorno para uso en requests posteriores."
 					},
 					"response": [
 						{
@@ -237,7 +252,7 @@
 								}
 							],
 							"cookie": [],
-							"body": "{\n    \"success\": true,\n    \"data\": {\n        \"id\": \"trans-123\",\n        \"productId\": \"prod-001\",\n        \"amount\": 4500000,\n        \"commission\": 135000,\n        \"shippingCost\": 15000,\n        \"totalAmount\": 4645000,\n        \"status\": \"PENDING\",\n        \"customerEmail\": \"cliente@ejemplo.com\",\n        \"customerName\": \"Juan Pérez\",\n        \"deliveryAddress\": \"Calle 123 #45-67\",\n        \"deliveryCity\": \"Bogotá\",\n        \"deliveryPhone\": \"+57 300 123 4567\",\n        \"idempotencyKey\": \"550e8400-e29b-41d4-a716-446655440000\",\n        \"createdAt\": \"2024-01-01T12:00:00.000Z\",\n        \"updatedAt\": \"2024-01-01T12:00:00.000Z\"\n    }\n}"
+							"body": "{\n    \"success\": true,\n    \"data\": {\n        \"id\": \"trans-123\",\n        \"productId\": \"prod-001\",\n        \"amount\": 4500000,\n        \"commission\": 135000,\n        \"shippingCost\": 15000,\n        \"totalAmount\": 4650000,\n        \"status\": \"PENDING\",\n        \"customerEmail\": \"cliente@ejemplo.com\",\n        \"customerName\": \"Juan Pérez\",\n        \"deliveryAddress\": \"Calle 123 #45-67\",\n        \"deliveryCity\": \"Bogotá\",\n        \"deliveryPhone\": \"+57 300 123 4567\",\n        \"idempotencyKey\": \"550e8400-e29b-41d4-a716-446655440000\",\n        \"createdAt\": \"2024-01-01T12:00:00.000Z\",\n        \"updatedAt\": \"2024-01-01T12:00:00.000Z\"\n    }\n}"
 						},
 						{
 							"name": "Validation Error",
@@ -284,6 +299,23 @@
 				},
 				{
 					"name": "Get Transaction by ID",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Transaction retrieved successfully', function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    pm.expect(jsonData.data).to.have.property('id');",
+									"    pm.expect(jsonData.data).to.have.property('status');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "GET",
 						"header": [
@@ -293,23 +325,16 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/transactions/:id",
+							"raw": "{{base_url}}/transactions/{{transaction_id}}",
 							"host": [
 								"{{base_url}}"
 							],
 							"path": [
 								"transactions",
-								":id"
-							],
-							"variable": [
-								{
-									"key": "id",
-									"value": "trans-123",
-									"description": "ID de la transacción"
-								}
+								"{{transaction_id}}"
 							]
 						},
-						"description": "Obtiene una transacción específica por su ID. Útil para verificar el estado del pago."
+						"description": "Obtiene una transacción específica por su ID. Útil para verificar el estado del pago.\n\n**Nota:** Usa automáticamente el `transaction_id` guardado por 'Create Transaction'."
 					},
 					"response": [
 						{
@@ -318,13 +343,13 @@
 								"method": "GET",
 								"header": [],
 								"url": {
-									"raw": "{{base_url}}/transactions/trans-123",
+									"raw": "{{base_url}}/transactions/{{transaction_id}}",
 									"host": [
 										"{{base_url}}"
 									],
 									"path": [
 										"transactions",
-										"trans-123"
+										"{{transaction_id}}"
 									]
 								}
 							},
@@ -338,7 +363,7 @@
 								}
 							],
 							"cookie": [],
-							"body": "{\n    \"success\": true,\n    \"data\": {\n        \"id\": \"trans-123\",\n        \"productId\": \"prod-001\",\n        \"amount\": 4500000,\n        \"commission\": 135000,\n        \"shippingCost\": 15000,\n        \"totalAmount\": 4645000,\n        \"status\": \"PENDING\",\n        \"customerEmail\": \"cliente@ejemplo.com\",\n        \"customerName\": \"Juan Pérez\",\n        \"deliveryAddress\": \"Calle 123 #45-67\",\n        \"deliveryCity\": \"Bogotá\",\n        \"deliveryPhone\": \"+57 300 123 4567\",\n        \"idempotencyKey\": \"550e8400-e29b-41d4-a716-446655440000\",\n        \"createdAt\": \"2024-01-01T12:00:00.000Z\",\n        \"updatedAt\": \"2024-01-01T12:00:00.000Z\"\n    }\n}"
+							"body": "{\n    \"success\": true,\n    \"data\": {\n        \"id\": \"trans-123\",\n        \"productId\": \"prod-001\",\n        \"amount\": 4500000,\n        \"commission\": 135000,\n        \"shippingCost\": 15000,\n        \"totalAmount\": 4650000,\n        \"status\": \"PENDING\",\n        \"customerEmail\": \"cliente@ejemplo.com\",\n        \"customerName\": \"Juan Pérez\",\n        \"deliveryAddress\": \"Calle 123 #45-67\",\n        \"deliveryCity\": \"Bogotá\",\n        \"deliveryPhone\": \"+57 300 123 4567\",\n        \"idempotencyKey\": \"550e8400-e29b-41d4-a716-446655440000\",\n        \"createdAt\": \"2024-01-01T12:00:00.000Z\",\n        \"updatedAt\": \"2024-01-01T12:00:00.000Z\"\n    }\n}"
 						},
 						{
 							"name": "Success Response - APPROVED",
@@ -346,13 +371,13 @@
 								"method": "GET",
 								"header": [],
 								"url": {
-									"raw": "{{base_url}}/transactions/trans-123",
+									"raw": "{{base_url}}/transactions/{{transaction_id}}",
 									"host": [
 										"{{base_url}}"
 									],
 									"path": [
 										"transactions",
-										"trans-123"
+										"{{transaction_id}}"
 									]
 								}
 							},
@@ -366,7 +391,7 @@
 								}
 							],
 							"cookie": [],
-							"body": "{\n    \"success\": true,\n    \"data\": {\n        \"id\": \"trans-123\",\n        \"productId\": \"prod-001\",\n        \"amount\": 4500000,\n        \"commission\": 135000,\n        \"shippingCost\": 15000,\n        \"totalAmount\": 4645000,\n        \"status\": \"APPROVED\",\n        \"customerEmail\": \"cliente@ejemplo.com\",\n        \"customerName\": \"Juan Pérez\",\n        \"deliveryAddress\": \"Calle 123 #45-67\",\n        \"deliveryCity\": \"Bogotá\",\n        \"deliveryPhone\": \"+57 300 123 4567\",\n        \"wompiTransactionId\": \"wompi_123456789\",\n        \"idempotencyKey\": \"550e8400-e29b-41d4-a716-446655440000\",\n        \"createdAt\": \"2024-01-01T12:00:00.000Z\",\n        \"updatedAt\": \"2024-01-01T12:05:00.000Z\"\n    }\n}"
+							"body": "{\n    \"success\": true,\n    \"data\": {\n        \"id\": \"trans-123\",\n        \"productId\": \"prod-001\",\n        \"amount\": 4500000,\n        \"commission\": 135000,\n        \"shippingCost\": 15000,\n        \"totalAmount\": 4650000,\n        \"status\": \"APPROVED\",\n        \"customerEmail\": \"cliente@ejemplo.com\",\n        \"customerName\": \"Juan Pérez\",\n        \"deliveryAddress\": \"Calle 123 #45-67\",\n        \"deliveryCity\": \"Bogotá\",\n        \"deliveryPhone\": \"+57 300 123 4567\",\n        \"wompiTransactionId\": \"wompi_123456789\",\n        \"idempotencyKey\": \"550e8400-e29b-41d4-a716-446655440000\",\n        \"createdAt\": \"2024-01-01T12:00:00.000Z\",\n        \"updatedAt\": \"2024-01-01T12:05:00.000Z\"\n    }\n}"
 						},
 						{
 							"name": "Not Found",
@@ -400,6 +425,22 @@
 				},
 				{
 					"name": "Get All Transactions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Transactions retrieved successfully', function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    pm.expect(jsonData.data).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "GET",
 						"header": [
@@ -445,7 +486,7 @@
 								}
 							],
 							"cookie": [],
-							"body": "{\n    \"success\": true,\n    \"data\": [\n        {\n            \"id\": \"trans-123\",\n            \"productId\": \"prod-001\",\n            \"amount\": 4500000,\n            \"commission\": 135000,\n            \"shippingCost\": 15000,\n            \"totalAmount\": 4645000,\n            \"status\": \"APPROVED\",\n            \"customerEmail\": \"cliente@ejemplo.com\",\n            \"customerName\": \"Juan Pérez\",\n            \"deliveryAddress\": \"Calle 123 #45-67\",\n            \"deliveryCity\": \"Bogotá\",\n            \"deliveryPhone\": \"+57 300 123 4567\",\n            \"wompiTransactionId\": \"wompi_123456789\",\n            \"idempotencyKey\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"createdAt\": \"2024-01-01T12:00:00.000Z\",\n            \"updatedAt\": \"2024-01-01T12:05:00.000Z\"\n        }\n    ]\n}"
+							"body": "{\n    \"success\": true,\n    \"data\": [\n        {\n            \"id\": \"trans-123\",\n            \"productId\": \"prod-001\",\n            \"amount\": 4500000,\n            \"commission\": 135000,\n            \"shippingCost\": 15000,\n            \"totalAmount\": 4650000,\n            \"status\": \"APPROVED\",\n            \"customerEmail\": \"cliente@ejemplo.com\",\n            \"customerName\": \"Juan Pérez\",\n            \"deliveryAddress\": \"Calle 123 #45-67\",\n            \"deliveryCity\": \"Bogotá\",\n            \"deliveryPhone\": \"+57 300 123 4567\",\n            \"wompiTransactionId\": \"wompi_123456789\",\n            \"idempotencyKey\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"createdAt\": \"2024-01-01T12:00:00.000Z\",\n            \"updatedAt\": \"2024-01-01T12:05:00.000Z\"\n        }\n    ]\n}"
 						}
 					]
 				}
@@ -457,6 +498,22 @@
 			"item": [
 				{
 					"name": "Process Payment",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Payment processed successfully', function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    pm.expect(jsonData.data).to.have.property('transactionId');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "POST",
 						"header": [
@@ -467,7 +524,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"transactionId\": \"trans-123\",\n    \"cardNumber\": \"4242424242424242\",\n    \"cvc\": \"123\",\n    \"expMonth\": \"08\",\n    \"expYear\": \"28\",\n    \"cardHolder\": \"JOSÉ PÉREZ\",\n    \"installments\": 1\n}",
+							"raw": "{\n    \"transactionId\": \"{{transaction_id}}\",\n    \"cardNumber\": \"4242424242424242\",\n    \"cvc\": \"123\",\n    \"expMonth\": \"08\",\n    \"expYear\": \"28\",\n    \"cardHolder\": \"JOSÉ PÉREZ\",\n    \"installments\": 1\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -484,11 +541,11 @@
 								"process"
 							]
 						},
-						"description": "Procesa un pago con tokenización segura de tarjeta. El sistema tokeniza la tarjeta, calcula la firma de integridad y procesa el pago. Inicia polling automático para verificar el estado del pago."
+						"description": "Procesa un pago con tokenización segura de tarjeta. El flujo es:\n1. Tokeniza la tarjeta con Wompi\n2. Inicia el workflow de Step Functions (o ejecución directa en desarrollo)\n3. El workflow procesa el pago, actualiza inventario y completa la transacción\n\n**Nota:** Usa automáticamente el `transaction_id` guardado por 'Create Transaction'.\n\n**Tarjetas de prueba Wompi Sandbox:**\n- `4242424242424242` → APPROVED\n- `4111111111111111` → DECLINED\n- `4012888888881881` → PENDING"
 					},
 					"response": [
 						{
-							"name": "Success Response - PENDING",
+							"name": "Success - Step Functions (producción)",
 							"originalRequest": {
 								"method": "POST",
 								"header": [
@@ -499,7 +556,7 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n    \"transactionId\": \"trans-123\",\n    \"cardNumber\": \"4242424242424242\",\n    \"cvc\": \"123\",\n    \"expMonth\": \"08\",\n    \"expYear\": \"28\",\n    \"cardHolder\": \"JOSÉ PÉREZ\",\n    \"installments\": 1\n}",
+									"raw": "{\n    \"transactionId\": \"{{transaction_id}}\",\n    \"cardNumber\": \"4242424242424242\",\n    \"cvc\": \"123\",\n    \"expMonth\": \"08\",\n    \"expYear\": \"28\",\n    \"cardHolder\": \"JOSÉ PÉREZ\",\n    \"installments\": 1\n}",
 									"options": {
 										"raw": {
 											"language": "json"
@@ -527,10 +584,10 @@
 								}
 							],
 							"cookie": [],
-							"body": "{\n    \"success\": true,\n    \"data\": {\n        \"transaction\": {\n            \"id\": \"trans-123\",\n            \"status\": \"PENDING\",\n            \"wompiTransactionId\": \"wompi_123456789\"\n        },\n        \"wompiResponse\": {\n            \"status\": \"PENDING\",\n            \"status_message\": \"Transacción en proceso\"\n        },\n        \"message\": \"Payment processing started. Polling for status...\"\n    }\n}"
+							"body": "{\n    \"success\": true,\n    \"data\": {\n        \"executionArn\": \"arn:aws:states:us-east-1:123456789012:execution:WompiPaymentProcessor-dev:exec-abc123\",\n        \"transactionId\": \"trans-123\"\n    }\n}"
 						},
 						{
-							"name": "Success Response - APPROVED",
+							"name": "Success - Direct Execution (desarrollo)",
 							"originalRequest": {
 								"method": "POST",
 								"header": [
@@ -541,7 +598,7 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n    \"transactionId\": \"trans-123\",\n    \"cardNumber\": \"4242424242424242\",\n    \"cvc\": \"123\",\n    \"expMonth\": \"08\",\n    \"expYear\": \"28\",\n    \"cardHolder\": \"JOSÉ PÉREZ\",\n    \"installments\": 1\n}",
+									"raw": "{\n    \"transactionId\": \"{{transaction_id}}\",\n    \"cardNumber\": \"4242424242424242\",\n    \"cvc\": \"123\",\n    \"expMonth\": \"08\",\n    \"expYear\": \"28\",\n    \"cardHolder\": \"JOSÉ PÉREZ\",\n    \"installments\": 1\n}",
 									"options": {
 										"raw": {
 											"language": "json"
@@ -569,7 +626,7 @@
 								}
 							],
 							"cookie": [],
-							"body": "{\n    \"success\": true,\n    \"data\": {\n        \"transaction\": {\n            \"id\": \"trans-123\",\n            \"status\": \"APPROVED\",\n            \"wompiTransactionId\": \"wompi_123456789\"\n        },\n        \"wompiResponse\": {\n            \"status\": \"APPROVED\",\n            \"status_message\": \"Transacción aprobada\"\n        },\n        \"message\": \"Payment processed successfully\"\n    }\n}"
+							"body": "{\n    \"success\": true,\n    \"data\": {\n        \"transactionId\": \"trans-123\",\n        \"executedDirectly\": true,\n        \"transaction\": {\n            \"id\": \"trans-123\",\n            \"status\": \"APPROVED\",\n            \"wompiTransactionId\": \"wompi_123456789\"\n        },\n        \"wompiResponse\": {\n            \"id\": \"wompi_123456789\",\n            \"status\": \"APPROVED\",\n            \"amount_in_cents\": 465000000,\n            \"currency\": \"COP\",\n            \"customer_email\": \"cliente@ejemplo.com\",\n            \"payment_method_type\": \"CARD\",\n            \"reference\": \"trans-123\"\n        }\n    }\n}"
 						},
 						{
 							"name": "Transaction Not Found",
@@ -653,18 +710,34 @@
 								}
 							],
 							"cookie": [],
-							"body": "{\n    \"statusCode\": 400,\n    \"message\": [\n        \"transactionId should not be empty\",\n        \"cardNumber must be between 13 and 19 digits\",\n        \"cvc should not be empty\",\n        \"expMonth must be between 01 and 12\",\n        \"expYear should not be empty\",\n        \"cardHolder should not be empty\",\n        \"installments must not be less than 1\"\n    ],\n    \"error\": \"Bad Request\"\n}"
+							"body": "{\n    \"statusCode\": 400,\n    \"message\": [\n        \"transactionId should not be empty\",\n        \"Card number must be between 13 and 19 digits\",\n        \"CVC must be 3 or 4 digits\",\n        \"cvc should not be empty\",\n        \"Expiration month must be between 01 and 12\",\n        \"Expiration year must be 2 digits\",\n        \"expYear should not be empty\",\n        \"cardHolder should not be empty\",\n        \"installments must not be less than 1\"\n    ],\n    \"error\": \"Bad Request\"\n}"
 						}
 					]
 				}
 			],
-			"description": "Endpoints para procesar pagos"
+			"description": "Endpoints para procesar pagos con Wompi"
 		},
 		{
 			"name": "Inventory",
 			"item": [
 				{
 					"name": "Get All Inventory",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Inventory retrieved successfully', function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    pm.expect(jsonData.data).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "GET",
 						"header": [
@@ -722,6 +795,22 @@
 			"item": [
 				{
 					"name": "Get All Events",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Events retrieved successfully', function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    pm.expect(jsonData.data).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "GET",
 						"header": [
@@ -804,6 +893,16 @@
 		{
 			"key": "idempotency_key",
 			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "transaction_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "product_id",
+			"value": "prod-001",
 			"type": "string"
 		}
 	]

@@ -2,6 +2,8 @@ service: payment-test
 
 frameworkVersion: '3'
 
+useDotenv: true
+
 provider:
   name: aws
   runtime: nodejs20.x
@@ -17,9 +19,9 @@ provider:
     SQS_QUEUE_URL: !Ref PaymentsQueue
     STEP_FUNCTION_ARN: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:WompiPaymentProcessor-${self:provider.stage}"
     WOMPI_API_URL: ${env:WOMPI_API_URL, 'https://api-sandbox.co.uat.wompi.dev/v1'}
-    WOMPI_PUBLIC_KEY: ${env:WOMPI_PUBLIC_KEY, 'pub_stagtest_g2u0HQd3ZMh05hsSgTS2lUV8t3s4mOt7'}
-    WOMPI_PRIVATE_KEY: ${env:WOMPI_PRIVATE_KEY, 'prv_stagtest_5i0ZGIGiFcDQifYsXxvsny7Y37tKqFWg'}
-    WOMPI_INTEGRITY_SECRET: ${env:WOMPI_INTEGRITY_SECRET, 'stagtest_integrity_nAIBuqayW70XpUqJS4qf4STYiISd89Fp'}
+    WOMPI_PUBLIC_KEY: ${env:WOMPI_PUBLIC_KEY}
+    WOMPI_PRIVATE_KEY: ${env:WOMPI_PRIVATE_KEY}
+    WOMPI_INTEGRITY_SECRET: ${env:WOMPI_INTEGRITY_SECRET}
     PAYMENT_POLLING_INTERVAL_MS: ${env:PAYMENT_POLLING_INTERVAL_MS, '10000'}
     PAYMENT_POLLING_MAX_DURATION_MS: ${env:PAYMENT_POLLING_MAX_DURATION_MS, '120000'}
     FRONTEND_URL: ${env:FRONTEND_URL, 'd2iz29zdtykupj.cloudfront.net'}
