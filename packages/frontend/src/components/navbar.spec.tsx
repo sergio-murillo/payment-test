@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { Navbar } from './navbar';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAppSelector } from '@/store/hooks';
@@ -40,6 +40,24 @@ describe('Navbar', () => {
     brand?.click();
 
     expect(mockPush).toHaveBeenCalledWith('/');
+  });
+
+  it('should navigate to home when Enter is pressed on brand', () => {
+    render(<Navbar />);
+
+    const brand = screen.getByText('Wompi Store').closest('[role="button"]')!;
+    fireEvent.keyDown(brand, { key: 'Enter' });
+
+    expect(mockPush).toHaveBeenCalledWith('/');
+  });
+
+  it('should not navigate when non-Enter key is pressed on brand', () => {
+    render(<Navbar />);
+
+    const brand = screen.getByText('Wompi Store').closest('[role="button"]')!;
+    fireEvent.keyDown(brand, { key: 'Space' });
+
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it('should show catalog button', () => {

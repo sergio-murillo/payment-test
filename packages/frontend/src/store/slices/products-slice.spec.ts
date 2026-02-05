@@ -1,5 +1,15 @@
 import reducer, { fetchProducts, fetchProduct } from './products-slice';
 import { Product } from './products-slice';
+import { configureStore } from '@reduxjs/toolkit';
+
+jest.mock('@/services/api-client', () => ({
+  apiClient: {
+    get: jest.fn(),
+  },
+}));
+
+import { apiClient } from '@/services/api-client';
+const mockGet = apiClient.get as jest.Mock;
 
 describe('productsSlice', () => {
   const initialState = {
@@ -62,6 +72,32 @@ describe('productsSlice', () => {
       };
       const state = reducer(initialState, action);
       expect(state.error).toBe('Failed to fetch products');
+    });
+  });
+
+  describe('fetchProducts thunk', () => {
+    it('should call apiClient.get and return data', async () => {
+      const products = [{ id: 'prod-001', name: 'P1' }];
+      mockGet.mockResolvedValue({ data: { data: products } });
+
+      const store = configureStore({ reducer: { products: reducer } });
+      await store.dispatch(fetchProducts());
+
+      expect(mockGet).toHaveBeenCalledWith('/products');
+      expect(store.getState().products.products).toEqual(products);
+    });
+  });
+
+  describe('fetchProduct thunk', () => {
+    it('should call apiClient.get with product id and return data', async () => {
+      const product = { id: 'prod-001', name: 'P1' };
+      mockGet.mockResolvedValue({ data: { data: product } });
+
+      const store = configureStore({ reducer: { products: reducer } });
+      await store.dispatch(fetchProduct('prod-001'));
+
+      expect(mockGet).toHaveBeenCalledWith('/products/prod-001');
+      expect(store.getState().products.products[0]).toEqual(product);
     });
   });
 

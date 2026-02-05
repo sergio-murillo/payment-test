@@ -1,5 +1,17 @@
 import reducer, { createTransaction, fetchTransaction, processPayment, clearTransaction } from './transaction-slice';
 import { Transaction } from './transaction-slice';
+import { configureStore } from '@reduxjs/toolkit';
+
+jest.mock('@/services/api-client', () => ({
+  apiClient: {
+    get: jest.fn(),
+    post: jest.fn(),
+  },
+}));
+
+import { apiClient } from '@/services/api-client';
+const mockGet = apiClient.get as jest.Mock;
+const mockPost = apiClient.post as jest.Mock;
 
 describe('transactionSlice', () => {
   const initialState = {
@@ -88,6 +100,15 @@ describe('transactionSlice', () => {
       expect(state.loading).toBe(false);
       expect(state.error).toBe('Network error');
     });
+
+    it('should handle rejected state with no error message', () => {
+      const action = {
+        type: createTransaction.rejected.type,
+        error: {},
+      };
+      const state = reducer(initialState, action);
+      expect(state.error).toBe('Failed to create transaction');
+    });
   });
 
   describe('fetchTransaction', () => {
@@ -141,6 +162,56 @@ describe('transactionSlice', () => {
       const state = reducer(initialState, action);
       expect(state.loading).toBe(false);
       expect(state.error).toBe('Payment failed');
+    });
+
+    it('should handle rejected state with no error message', () => {
+      const action = {
+        type: processPayment.rejected.type,
+        error: {},
+      };
+      const state = reducer(initialState, action);
+      expect(state.error).toBe('Failed to process payment');
+    });
+  });
+
+  describe('async thunk bodies', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+
+    it('createTransaction should call apiClient.post and return data', async () => {
+      const txData = { productId: 'prod-001', amount: 100000 };
+      const txResult = { id: 'trans-001', ...txData, status: 'PENDING' };
+      mockPost.mockResolvedValue({ data: { data: txResult } });
+
+      const store = configureStore({ reducer: { transaction: reducer } });
+      await store.dispatch(createTransaction(txData));
+
+      expect(mockPost).toHaveBeenCalledWith('/transactions', txData);
+      expect(store.getState().transaction.currentTransaction).toEqual(txResult);
+    });
+
+    it('fetchTransaction should call apiClient.get and return data', async () => {
+      const txResult = { id: 'trans-001', status: 'APPROVED' };
+      mockGet.mockResolvedValue({ data: { data: txResult } });
+
+      const store = configureStore({ reducer: { transaction: reducer } });
+      await store.dispatch(fetchTransaction('trans-001'));
+
+      expect(mockGet).toHaveBeenCalledWith('/transactions/trans-001');
+      expect(store.getState().transaction.currentTransaction).toEqual(txResult);
+    });
+
+    it('processPayment should call apiClient.post and return data', async () => {
+      const paymentData = { transactionId: 'trans-001', cardNumber: '4242424242424242' };
+      const paymentResult = { success: true };
+      mockPost.mockResolvedValue({ data: { data: paymentResult } });
+
+      const store = configureStore({ reducer: { transaction: reducer } });
+      await store.dispatch(processPayment(paymentData));
+
+      expect(mockPost).toHaveBeenCalledWith('/payments/process', paymentData);
+      expect(store.getState().transaction.loading).toBe(false);
     });
   });
 });

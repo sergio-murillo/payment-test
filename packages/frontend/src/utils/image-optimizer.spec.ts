@@ -47,6 +47,16 @@ describe('image-optimizer', () => {
       expect(getDeviceType()).toBe('desktop');
     });
 
+    it('should return desktop when window is undefined (SSR)', () => {
+      const originalWindow = global.window;
+      // @ts-ignore
+      delete global.window;
+
+      expect(getDeviceType()).toBe('desktop');
+
+      global.window = originalWindow;
+    });
+
     it('should return desktop for exactly 1024', () => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
