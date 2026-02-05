@@ -17,6 +17,7 @@ interface ProductDetailsProps {
 
 export function ProductDetails({ product, onPayClick }: ProductDetailsProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [navigating, setNavigating] = useState(false);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('es-CO', {
@@ -118,13 +119,14 @@ export function ProductDetails({ product, onPayClick }: ProductDetailsProps) {
               type="primary"
               size="large"
               block
-              onClick={onPayClick}
-              disabled={product.stock <= 0}
+              onClick={() => { setNavigating(true); onPayClick(); }}
+              disabled={product.stock <= 0 || navigating}
+              loading={navigating}
               icon={<CreditCardOutlined />}
               style={{
                 height: 52,
                 fontSize: 16,
-                ...( product.stock > 0 ? {
+                ...( product.stock > 0 && !navigating ? {
                   background: 'linear-gradient(135deg, #722ed1 0%, #9333ea 100%)',
                   border: 'none',
                   boxShadow: '0 6px 20px rgba(114, 46, 209, 0.3)',

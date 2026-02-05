@@ -659,6 +659,8 @@ export function PaymentForm({ product, onBack }: PaymentFormProps) {
                 size="large"
                 icon={<LockOutlined />}
                 className="payment-submit-btn"
+                loading={processing}
+                disabled={processing}
               >
                 Pagar {formatPrice(total)}
               </Button>
@@ -733,6 +735,8 @@ export function PaymentForm({ product, onBack }: PaymentFormProps) {
                 icon={<LockOutlined />}
                 className="payment-submit-btn"
                 onClick={() => form.submit()}
+                loading={processing}
+                disabled={processing}
               >
                 Pagar {formatPrice(total)}
               </Button>

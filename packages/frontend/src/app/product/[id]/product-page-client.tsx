@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchProduct } from '@/store/slices/products-slice';
@@ -17,6 +17,7 @@ export default function ProductPageClient() {
   const dispatch = useAppDispatch();
   const { products, loading } = useAppSelector((state) => state.products);
   const pathname = usePathname();
+  const [navigating, setNavigating] = useState(false);
 
   const productId = useMemo(() => {
     const parts = pathname.split('/');
@@ -67,7 +68,9 @@ export default function ProductPageClient() {
           <Button
             type="text"
             icon={<ArrowLeftOutlined />}
-            onClick={() => router.push('/')}
+            onClick={() => { setNavigating(true); router.push('/'); }}
+            loading={navigating}
+            disabled={navigating}
             style={{ fontWeight: 600, color: '#722ed1' }}
           >
             Volver a productos

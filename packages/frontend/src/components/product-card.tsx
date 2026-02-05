@@ -17,6 +17,7 @@ interface ProductCardProps {
 
 export function ProductCard({ product, onClick }: ProductCardProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [navigating, setNavigating] = useState(false);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('es-CO', {
@@ -61,11 +62,13 @@ export function ProductCard({ product, onClick }: ProductCardProps) {
         <Button
           type="primary"
           block
-          onClick={onClick}
+          onClick={() => { setNavigating(true); onClick(); }}
           key="buy"
           icon={<ShoppingCartOutlined />}
+          loading={navigating}
+          disabled={navigating}
           style={{
-            background: 'linear-gradient(135deg, #722ed1 0%, #9333ea 100%)',
+            background: navigating ? undefined : 'linear-gradient(135deg, #722ed1 0%, #9333ea 100%)',
             border: 'none',
             fontWeight: 600,
           }}
