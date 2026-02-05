@@ -1,4 +1,4 @@
-service: wompi-payments-backend
+service: payment-test
 
 frameworkVersion: '3'
 
@@ -13,15 +13,16 @@ provider:
     STAGE: ${self:provider.stage}
     REGION: ${self:provider.region}
     DYNAMODB_TABLE_PREFIX: ${self:provider.stage}
-    SNS_TOPIC_ARN: ${self:custom.snsTopicArn}
-    SQS_QUEUE_URL: ${self:custom.sqsQueueUrl}
-    STEP_FUNCTION_ARN: ${self:custom.stepFunctionArn}
+    SNS_TOPIC_ARN: !Ref PaymentsTopic
+    SQS_QUEUE_URL: !Ref PaymentsQueue
+    STEP_FUNCTION_ARN: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:WompiPaymentProcessor-${self:provider.stage}"
     WOMPI_API_URL: ${env:WOMPI_API_URL, 'https://api-sandbox.co.uat.wompi.dev/v1'}
-    WOMPI_PUBLIC_KEY: ${env:WOMPI_PUBLIC_KEY}
-    WOMPI_PRIVATE_KEY: ${env:WOMPI_PRIVATE_KEY}
-    WOMPI_INTEGRITY_SECRET: ${env:WOMPI_INTEGRITY_SECRET}
+    WOMPI_PUBLIC_KEY: ${env:WOMPI_PUBLIC_KEY, 'pub_stagtest_g2u0HQd3ZMh05hsSgTS2lUV8t3s4mOt7'}
+    WOMPI_PRIVATE_KEY: ${env:WOMPI_PRIVATE_KEY, 'prv_stagtest_5i0ZGIGiFcDQifYsXxvsny7Y37tKqFWg'}
+    WOMPI_INTEGRITY_SECRET: ${env:WOMPI_INTEGRITY_SECRET, 'stagtest_integrity_nAIBuqayW70XpUqJS4qf4STYiISd89Fp'}
     PAYMENT_POLLING_INTERVAL_MS: ${env:PAYMENT_POLLING_INTERVAL_MS, '10000'}
     PAYMENT_POLLING_MAX_DURATION_MS: ${env:PAYMENT_POLLING_MAX_DURATION_MS, '120000'}
+    FRONTEND_URL: ${env:FRONTEND_URL, 'd2iz29zdtykupj.cloudfront.net'}
   iam:
     role:
       statements:
@@ -42,7 +43,7 @@ provider:
           Action:
             - sns:Publish
           Resource:
-            - ${self:custom.snsTopicArn}
+            - !Ref PaymentsTopic
         - Effect: Allow
           Action:
             - sqs:SendMessage
@@ -50,36 +51,36 @@ provider:
             - sqs:DeleteMessage
             - sqs:GetQueueAttributes
           Resource:
-            - ${self:custom.sqsQueueArn}
+            - !GetAtt PaymentsQueue.Arn
         - Effect: Allow
           Action:
             - states:StartExecution
             - states:DescribeExecution
             - states:StopExecution
           Resource:
-            - ${self:custom.stepFunctionArn}
+            - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:WompiPaymentProcessor-${self:provider.stage}"
+
+package:
+  patterns:
+    - '!**'
+    - 'dist/**'
 
 plugins:
+  - serverless-dotenv-plugin
   - serverless-offline
-  - serverless-plugin-typescript
 
 custom:
-  snsTopicArn:
-    dev: arn:aws:sns:us-east-1:123456789012:dev-payments-events
-    staging: arn:aws:sns:us-east-1:123456789012:wompi-payments-events-staging
-    prod: arn:aws:sns:us-east-1:123456789012:wompi-payments-events-prod
-  sqsQueueUrl:
-    dev: https://sqs.us-east-1.amazonaws.com/123456789012/dev-payments-queue
-    staging: https://sqs.us-east-1.amazonaws.com/123456789012/wompi-payments-queue-staging
-    prod: https://sqs.us-east-1.amazonaws.com/123456789012/wompi-payments-queue-prod
-  sqsQueueArn:
-    dev: arn:aws:sqs:us-east-1:123456789012:dev-payments-queue
-    staging: arn:aws:sqs:us-east-1:123456789012:wompi-payments-queue-staging
-    prod: arn:aws:sqs:us-east-1:123456789012:wompi-payments-queue-prod
-  stepFunctionArn:
-    dev: arn:aws:states:us-east-1:123456789012:stateMachine:WompiPaymentProcessor-dev
-    staging: arn:aws:states:us-east-1:123456789012:stateMachine:WompiPaymentProcessor-staging
-    prod: arn:aws:states:us-east-1:123456789012:stateMachine:WompiPaymentProcessor-prod
+  dotenv:
+    path: .env
+    basePath: ./
+    include:
+      - WOMPI_PUBLIC_KEY
+      - WOMPI_PRIVATE_KEY
+      - WOMPI_INTEGRITY_SECRET
+      - WOMPI_API_URL
+      - PAYMENT_POLLING_INTERVAL_MS
+      - PAYMENT_POLLING_MAX_DURATION_MS
+      - FRONTEND_URL
 
 functions:
   api:
@@ -93,6 +94,22 @@ functions:
           path: /
           method: ANY
           cors: true
+
+  validateTransaction:
+    handler: dist/payments/lambdas/step-functions-handlers.validateTransactionHandler
+    timeout: 30
+
+  processPayment:
+    handler: dist/payments/lambdas/step-functions-handlers.processPaymentHandler
+    timeout: 30
+
+  updateInventory:
+    handler: dist/payments/lambdas/step-functions-handlers.updateInventoryHandler
+    timeout: 30
+
+  compensateTransaction:
+    handler: dist/payments/lambdas/step-functions-handlers.compensateTransactionHandler
+    timeout: 30
 
 resources:
   Resources:
@@ -217,62 +234,80 @@ resources:
       Type: AWS::StepFunctions::StateMachine
       Properties:
         StateMachineName: WompiPaymentProcessor-${self:provider.stage}
-        DefinitionString: !Sub |
-          {
-            "Comment": "Wompi Payment Processing Workflow",
-            "StartAt": "ValidateTransaction",
-            "States": {
-              "ValidateTransaction": {
-                "Type": "Task",
-                "Resource": "arn:aws:states:::lambda:invoke",
-                "Parameters": {
-                  "FunctionName": "${ValidateTransactionFunction}",
-                  "Payload.$": "$"
-                },
-                "Next": "ProcessPayment"
-              },
-              "ProcessPayment": {
-                "Type": "Task",
-                "Resource": "arn:aws:states:::lambda:invoke",
-                "Parameters": {
-                  "FunctionName": "${ProcessPaymentFunction}",
-                  "Payload.$": "$"
-                },
-                "Next": "UpdateInventory",
-                "Catch": [{
-                  "ErrorEquals": ["States.ALL"],
-                  "ResultPath": "$.error",
-                  "Next": "CompensateTransaction"
-                }]
-              },
-              "UpdateInventory": {
-                "Type": "Task",
-                "Resource": "arn:aws:states:::lambda:invoke",
-                "Parameters": {
-                  "FunctionName": "${UpdateInventoryFunction}",
-                  "Payload.$": "$"
-                },
-                "Next": "CompleteTransaction",
-                "Catch": [{
-                  "ErrorEquals": ["States.ALL"],
-                  "ResultPath": "$.error",
-                  "Next": "CompensateTransaction"
-                }]
-              },
-              "CompleteTransaction": {
-                "Type": "Succeed"
-              },
-              "CompensateTransaction": {
-                "Type": "Task",
-                "Resource": "arn:aws:states:::lambda:invoke",
-                "Parameters": {
-                  "FunctionName": "${CompensateTransactionFunction}",
-                  "Payload.$": "$"
-                },
-                "End": true
+        DefinitionString:
+          Fn::Sub:
+            - |
+              {
+                "Comment": "Wompi Payment Processing Workflow",
+                "StartAt": "ValidateTransaction",
+                "States": {
+                  "ValidateTransaction": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "FunctionName": "${ValidateTransactionArn}",
+                      "Payload.$": "$"
+                    },
+                    "Next": "ProcessPayment"
+                  },
+                  "ProcessPayment": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "FunctionName": "${ProcessPaymentArn}",
+                      "Payload.$": "$"
+                    },
+                    "Next": "UpdateInventory",
+                    "Catch": [{
+                      "ErrorEquals": ["States.ALL"],
+                      "ResultPath": "$.error",
+                      "Next": "CompensateTransaction"
+                    }]
+                  },
+                  "UpdateInventory": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "FunctionName": "${UpdateInventoryArn}",
+                      "Payload.$": "$"
+                    },
+                    "Next": "CompleteTransaction",
+                    "Catch": [{
+                      "ErrorEquals": ["States.ALL"],
+                      "ResultPath": "$.error",
+                      "Next": "CompensateTransaction"
+                    }]
+                  },
+                  "CompleteTransaction": {
+                    "Type": "Succeed"
+                  },
+                  "CompensateTransaction": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "FunctionName": "${CompensateTransactionArn}",
+                      "Payload.$": "$"
+                    },
+                    "End": true
+                  }
+                }
               }
-            }
-          }
+            - ValidateTransactionArn:
+                Fn::GetAtt:
+                  - ValidateTransactionLambdaFunction
+                  - Arn
+              ProcessPaymentArn:
+                Fn::GetAtt:
+                  - ProcessPaymentLambdaFunction
+                  - Arn
+              UpdateInventoryArn:
+                Fn::GetAtt:
+                  - UpdateInventoryLambdaFunction
+                  - Arn
+              CompensateTransactionArn:
+                Fn::GetAtt:
+                  - CompensateTransactionLambdaFunction
+                  - Arn
         RoleArn: !GetAtt StepFunctionRole.Arn
 
     StepFunctionRole:

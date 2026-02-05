@@ -20,7 +20,7 @@ export class GetAllProductsUseCase {
 
   async execute(): Promise<Result<Product[]>> {
     try {
-      this.logger.debug('Getting all products', 'GetAllProductsUseCase');
+      this.logger.debug('Fetching all products', 'GetAllProductsUseCase');
 
       const products = await this.productRepository.findAll();
 

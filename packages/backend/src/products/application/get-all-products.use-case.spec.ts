@@ -79,7 +79,7 @@ describe('GetAllProductsUseCase', () => {
     expect(result.data).toEqual(products);
     expect(repository.findAll).toHaveBeenCalled();
     expect(logger.debug).toHaveBeenCalledWith(
-      'Getting all products',
+      'Fetching all products',
       'GetAllProductsUseCase',
     );
   });

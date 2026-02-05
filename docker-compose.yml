@@ -3,7 +3,7 @@ version: '3.8'
 services:
   dynamodb:
     image: amazon/dynamodb-local:latest
-    container_name: wompi-dynamodb
+    container_name: payment-test-dynamodb
     ports:
       - "8000:8000"
     command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
@@ -18,7 +18,7 @@ services:
     build:
       context: .
       dockerfile: scripts/Dockerfile.dynamodb-init
-    container_name: wompi-dynamodb-init
+    container_name: payment-test-dynamodb-init
     depends_on:
       dynamodb:
         condition: service_started
@@ -29,7 +29,7 @@ services:
 
   localstack:
     image: localstack/localstack:latest
-    container_name: wompi-localstack
+    container_name: payment-test-localstack
     ports:
       - "4566:4566"
       - "4510-4559:4510-4559"
@@ -56,7 +56,7 @@ services:
     build:
       context: .
       dockerfile: scripts/Dockerfile.localstack-init
-    container_name: wompi-localstack-init
+    container_name: payment-test-localstack-init
     depends_on:
       localstack:
         condition: service_started
@@ -70,7 +70,7 @@ services:
     build:
       context: .
       dockerfile: scripts/Dockerfile.sqs-poller
-    container_name: wompi-sqs-poller
+    container_name: payment-test-sqs-poller
     depends_on:
       localstack:
         condition: service_started
@@ -101,7 +101,7 @@ services:
     build:
       context: ./packages/backend
       dockerfile: Dockerfile.dev
-    container_name: wompi-backend
+    container_name: payment-test-backend
     ports:
       - "3001:3001"
     environment:
@@ -146,7 +146,7 @@ services:
     build:
       context: ./packages/frontend
       dockerfile: Dockerfile.dev
-    container_name: wompi-frontend
+    container_name: payment-test-frontend
     ports:
       - "3000:3000"
     environment:

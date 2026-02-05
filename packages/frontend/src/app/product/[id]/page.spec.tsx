@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import ProductPage from './page';
+import ProductPage from './product-page-client';
 
 const mockPush = jest.fn();
 const mockDispatch = jest.fn().mockReturnValue({ unwrap: () => Promise.resolve() });

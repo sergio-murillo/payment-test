@@ -26,6 +26,11 @@ export const handler = async (event: any, context: any) => {
 
     nestApp.useGlobalFilters(new HttpExceptionFilter(logger));
 
+    nestApp.enableCors({
+      origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+      credentials: true,
+    });
+
     const config = new DocumentBuilder()
       .setTitle('Wompi Payments API')
       .setDescription('API for processing payments with Wompi')
@@ -58,7 +63,6 @@ async function bootstrap() {
   );
 
   app.useGlobalFilters(new HttpExceptionFilter(logger));
-
   app.enableCors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,

@@ -1,0 +1,193 @@
+service: store-frontend
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+
+plugins:
+  - serverless-s3-sync
+  - serverless-cloudfront-invalidate
+
+custom:
+  bucketName: store-frontend-${self:provider.stage}
+  s3Sync:
+    - bucketName: ${self:custom.bucketName}
+      localDir: out
+      deleteRemoved: true
+      defaultContentType: text/html
+      params:
+        - "**/*.html":
+            CacheControl: "public, max-age=0, s-maxage=31536000, must-revalidate"
+        - "**/*.js":
+            CacheControl: "public, max-age=31536000, immutable"
+        - "**/*.css":
+            CacheControl: "public, max-age=31536000, immutable"
+        - "**/*.{jpg,jpeg,png,gif,svg,webp,ico}":
+            CacheControl: "public, max-age=31536000, immutable"
+        - "**/*.json":
+            CacheControl: "public, max-age=0, s-maxage=31536000, must-revalidate"
+  cloudfrontInvalidate:
+    - distributionIdKey: CloudFrontDistributionId
+      items:
+        - "/*"
+
+resources:
+  Resources:
+    # S3 Bucket para archivos estaticos
+    StaticSiteBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.bucketName}
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+        WebsiteConfiguration:
+          IndexDocument: index.html
+          ErrorDocument: 404.html
+        CorsConfiguration:
+          CorsRules:
+            - AllowedHeaders: ["*"]
+              AllowedMethods: [GET, HEAD]
+              AllowedOrigins: ["*"]
+              MaxAge: 3600
+
+    # Politica del bucket: solo acceso desde CloudFront via OAC
+    StaticSiteBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref StaticSiteBucket
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: AllowCloudFrontOAC
+              Effect: Allow
+              Principal:
+                Service: cloudfront.amazonaws.com
+              Action: s3:GetObject
+              Resource: !Sub "${StaticSiteBucket.Arn}/*"
+              Condition:
+                StringEquals:
+                  "AWS:SourceArn": !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
+    # Origin Access Control para CloudFront -> S3
+    CloudFrontOAC:
+      Type: AWS::CloudFront::OriginAccessControl
+      Properties:
+        OriginAccessControlConfig:
+          Name: store-oac-${self:provider.stage}
+          OriginAccessControlOriginType: s3
+          SigningBehavior: always
+          SigningProtocol: sigv4
+
+    # CloudFront Function para reescribir rutas dinamicas de Next.js
+    # Redirige /product/[id] y /checkout/[id] al placeholder /product/_/ y /checkout/_/
+    NextJsRouterFunction:
+      Type: AWS::CloudFront::Function
+      Properties:
+        Name: next-router-${self:provider.stage}
+        AutoPublish: true
+        FunctionConfig:
+          Comment: "Rewrite dynamic Next.js routes to static placeholder paths"
+          Runtime: cloudfront-js-2.0
+        FunctionCode: |
+          function handler(event) {
+            var request = event.request;
+            var uri = request.uri;
+
+            // No reescribir assets estaticos
+            if (uri.startsWith('/_next/') || uri.startsWith('/favicon')) {
+              return request;
+            }
+
+            // Reescribir /product/[id] -> /product/_/
+            if (/^\/product\/(?!_\/)[^\/]+(\/.*)?$/.test(uri)) {
+              var suffix = uri.match(/^\/product\/[^\/]+(\/(.*))?$/);
+              var file = (suffix && suffix[2]) ? suffix[2] : 'index.html';
+              request.uri = '/product/_/' + file;
+              return request;
+            }
+
+            // Reescribir /checkout/[id] -> /checkout/_/
+            if (/^\/checkout\/(?!_\/)[^\/]+(\/.*)?$/.test(uri)) {
+              var suffix = uri.match(/^\/checkout\/[^\/]+(\/(.*))?$/);
+              var file = (suffix && suffix[2]) ? suffix[2] : 'index.html';
+              request.uri = '/checkout/_/' + file;
+              return request;
+            }
+
+            // Para rutas sin extension de archivo, servir index.html
+            if (uri !== '/' && !uri.includes('.')) {
+              if (uri.endsWith('/')) {
+                request.uri = uri + 'index.html';
+              } else {
+                request.uri = uri + '/index.html';
+              }
+            }
+
+            return request;
+          }
+
+    # Distribucion CloudFront
+    CloudFrontDistribution:
+      Type: AWS::CloudFront::Distribution
+      Properties:
+        DistributionConfig:
+          Enabled: true
+          Comment: "Store Frontend - ${self:provider.stage}"
+          DefaultRootObject: index.html
+          HttpVersion: http2and3
+          PriceClass: PriceClass_100
+          Origins:
+            - Id: S3Origin
+              DomainName: !GetAtt StaticSiteBucket.RegionalDomainName
+              OriginAccessControlId: !Ref CloudFrontOAC
+              S3OriginConfig:
+                OriginAccessIdentity: ""
+          DefaultCacheBehavior:
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+            OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf  # CORS-S3Origin
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt NextJsRouterFunction.FunctionARN
+          CacheBehaviors:
+            - PathPattern: "/_next/static/*"
+              TargetOriginId: S3Origin
+              ViewerProtocolPolicy: redirect-to-https
+              AllowedMethods: [GET, HEAD]
+              CachedMethods: [GET, HEAD]
+              Compress: true
+              CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          CustomErrorResponses:
+            - ErrorCode: 403
+              ResponseCode: 200
+              ResponsePagePath: /index.html
+              ErrorCachingMinTTL: 10
+            - ErrorCode: 404
+              ResponseCode: 200
+              ResponsePagePath: /404.html
+              ErrorCachingMinTTL: 10
+
+  Outputs:
+    StaticSiteBucketName:
+      Value: !Ref StaticSiteBucket
+      Description: Nombre del bucket S3
+    CloudFrontDistributionId:
+      Value: !Ref CloudFrontDistribution
+      Description: ID de la distribucion CloudFront
+    CloudFrontDomainName:
+      Value: !GetAtt CloudFrontDistribution.DomainName
+      Description: URL de la distribucion CloudFront
+    WebsiteURL:
+      Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+      Description: URL publica del sitio
