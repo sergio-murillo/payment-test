@@ -24,7 +24,7 @@ import 'react-credit-cards-2/dist/es/styles-compiled.css';
 import { Product } from '@/store/slices/products-slice';
 import { useOptimizedImage } from '@/hooks/use-optimized-image';
 import { CardBrandIcon } from './card-brand-icon';
-import { createTransaction, processPayment, fetchTransaction } from '@/store/slices/transaction-slice';
+import { createTransaction, processPayment, fetchTransaction, clearTransaction } from '@/store/slices/transaction-slice';
 import { v4 as uuidv4 } from 'uuid';
 
 const { Title, Text } = Typography;
@@ -43,6 +43,22 @@ export function PaymentForm({ product, onBack }: PaymentFormProps) {
   const [form] = Form.useForm();
   const [processing, setProcessing] = useState(false);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Clear transaction if it's for a different product
+  useEffect(() => {
+    if (currentTransaction && currentTransaction.productId !== product.id) {
+      dispatch(clearTransaction());
+      setProcessing(false);
+      form.resetFields();
+      setCardState({
+        number: '',
+        name: '',
+        expiry: '',
+        cvc: '',
+        focused: '',
+      });
+    }
+  }, [product.id, currentTransaction, dispatch, form]);
 
   // Pre-fill form with transaction data if available
   useEffect(() => {
@@ -255,9 +271,23 @@ export function PaymentForm({ product, onBack }: PaymentFormProps) {
     );
   }
 
-  // Show result if transaction is in final state
-  if (currentTransaction && currentTransaction.status !== 'PENDING') {
+  // Show result if transaction is in final state and it's for the current product
+  if (currentTransaction && currentTransaction.status !== 'PENDING' && currentTransaction.productId === product.id) {
     const isSuccess = currentTransaction.status === 'APPROVED';
+
+    const handleBackFromResult = () => {
+      dispatch(clearTransaction());
+      setProcessing(false);
+      form.resetFields();
+      setCardState({
+        number: '',
+        name: '',
+        expiry: '',
+        cvc: '',
+        focused: '',
+      });
+      onBack();
+    };
 
     return (
       <div className="payment-page">
@@ -265,7 +295,7 @@ export function PaymentForm({ product, onBack }: PaymentFormProps) {
           <Button
             type="text"
             icon={<ArrowLeftOutlined />}
-            onClick={onBack}
+            onClick={handleBackFromResult}
             className="payment-back-btn"
           >
             Volver al producto
@@ -298,7 +328,19 @@ export function PaymentForm({ product, onBack }: PaymentFormProps) {
                   type="primary"
                   key="home"
                   icon={<HomeOutlined />}
-                  onClick={() => router.push('/')}
+                  onClick={() => {
+                    dispatch(clearTransaction());
+                    setProcessing(false);
+                    form.resetFields();
+                    setCardState({
+                      number: '',
+                      name: '',
+                      expiry: '',
+                      cvc: '',
+                      focused: '',
+                    });
+                    router.push('/');
+                  }}
                   style={{
                     background: 'linear-gradient(135deg, #722ed1 0%, #9333ea 100%)',
                     border: 'none',

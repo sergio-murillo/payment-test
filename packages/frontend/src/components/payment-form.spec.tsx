@@ -58,6 +58,9 @@ jest.mock('@/store/slices/transaction-slice', () => ({
       },
     },
   ),
+  clearTransaction: jest.fn(() => ({
+    type: 'transaction/clearTransaction',
+  })),
 }));
 
 import { useAppSelector } from '@/store/hooks';
@@ -249,6 +252,7 @@ describe('PaymentForm', () => {
       mockUseAppSelector.mockReturnValue({
         currentTransaction: {
           id: 'trans-001',
+          productId: 'prod-001',
           status: 'APPROVED',
           totalAmount: 118000,
         },
@@ -268,6 +272,7 @@ describe('PaymentForm', () => {
       mockUseAppSelector.mockReturnValue({
         currentTransaction: {
           id: 'trans-001',
+          productId: 'prod-001',
           status: 'DECLINED',
           totalAmount: 118000,
           errorMessage: 'Fondos insuficientes',
@@ -285,6 +290,7 @@ describe('PaymentForm', () => {
       mockUseAppSelector.mockReturnValue({
         currentTransaction: {
           id: 'trans-001',
+          productId: 'prod-001',
           status: 'DECLINED',
           totalAmount: 118000,
           errorMessage: '',
@@ -303,6 +309,7 @@ describe('PaymentForm', () => {
       mockUseAppSelector.mockReturnValue({
         currentTransaction: {
           id: 'trans-001',
+          productId: 'prod-001',
           status: 'APPROVED',
           totalAmount: 118000,
         },
@@ -319,6 +326,7 @@ describe('PaymentForm', () => {
       mockUseAppSelector.mockReturnValue({
         currentTransaction: {
           id: 'trans-001',
+          productId: 'prod-001',
           status: 'APPROVED',
           totalAmount: 118000,
         },
@@ -340,6 +348,7 @@ describe('PaymentForm', () => {
       mockUseAppSelector.mockReturnValue({
         currentTransaction: {
           id: 'trans-002',
+          productId: 'prod-001',
           status: 'ERROR',
           totalAmount: 118000,
           errorMessage: 'Error interno',
@@ -357,6 +366,7 @@ describe('PaymentForm', () => {
       mockUseAppSelector.mockReturnValue({
         currentTransaction: {
           id: 'trans-003',
+          productId: 'prod-001',
           status: 'VOIDED',
           totalAmount: 118000,
           errorMessage: '',
@@ -376,6 +386,7 @@ describe('PaymentForm', () => {
       mockUseAppSelector.mockReturnValue({
         currentTransaction: {
           id: 'trans-001',
+          productId: 'prod-001',
           status: 'PENDING',
           customerName: 'John Doe',
           customerEmail: 'john@example.com',
