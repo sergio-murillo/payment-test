@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { ProcessPaymentUseCase } from './process-payment.use-case';
-import { WompiPaymentAdapter } from '../domain/wompi-payment-adapter';
+import { GatewayPaymentAdapter } from '../domain/payment-gateway.port';
 import { TransactionRepository } from '../../transactions/domain/transaction.repository';
 import { EventStoreService } from '../../event-store/application/event-store.service';
 import { SnsService } from '../../shared/messaging/sns.service';
@@ -11,12 +11,12 @@ import { CompensateTransactionUseCase } from './compensate-transaction.use-case'
 import { LoggerService } from '../../shared/logger/logger.service';
 import { Transaction } from '../../transactions/domain/transaction.entity';
 import { TransactionStatus } from '../../transactions/domain/transaction-status.enum';
-import { WOMPI_PAYMENT_ADAPTER_TOKEN } from '../payments.tokens';
+import { PAYMENT_GATEWAY_ADAPTER_TOKEN } from '../payments.tokens';
 import { TRANSACTION_REPOSITORY_TOKEN } from '../../transactions/transactions.tokens';
 
 describe('ProcessPaymentUseCase', () => {
   let useCase: ProcessPaymentUseCase;
-  let wompiAdapter: jest.Mocked<WompiPaymentAdapter>;
+  let gatewayAdapter: jest.Mocked<GatewayPaymentAdapter>;
   let transactionRepository: jest.Mocked<TransactionRepository>;
   let eventStore: jest.Mocked<EventStoreService>;
   let snsService: jest.Mocked<SnsService>;
@@ -27,7 +27,7 @@ describe('ProcessPaymentUseCase', () => {
   let logger: jest.Mocked<LoggerService>;
 
   beforeEach(async () => {
-    const mockWompiAdapter = {
+    const mockGatewayAdapter = {
       tokenizeCard: jest.fn(),
       createPayment: jest.fn(),
       getPaymentStatus: jest.fn(),
@@ -72,8 +72,8 @@ describe('ProcessPaymentUseCase', () => {
       providers: [
         ProcessPaymentUseCase,
         {
-          provide: WOMPI_PAYMENT_ADAPTER_TOKEN,
-          useValue: mockWompiAdapter,
+          provide: PAYMENT_GATEWAY_ADAPTER_TOKEN,
+          useValue: mockGatewayAdapter,
         },
         {
           provide: TRANSACTION_REPOSITORY_TOKEN,
@@ -111,7 +111,7 @@ describe('ProcessPaymentUseCase', () => {
     }).compile();
 
     useCase = module.get<ProcessPaymentUseCase>(ProcessPaymentUseCase);
-    wompiAdapter = module.get(WOMPI_PAYMENT_ADAPTER_TOKEN);
+    gatewayAdapter = module.get(PAYMENT_GATEWAY_ADAPTER_TOKEN);
     transactionRepository = module.get(TRANSACTION_REPOSITORY_TOKEN);
     eventStore = module.get(EventStoreService);
     snsService = module.get(SnsService);
@@ -150,7 +150,7 @@ describe('ProcessPaymentUseCase', () => {
       );
 
       transactionRepository.findById.mockResolvedValue(transaction);
-      wompiAdapter.tokenizeCard.mockResolvedValue({
+      gatewayAdapter.tokenizeCard.mockResolvedValue({
         status: 'CREATED',
         data: {
           id: 'tok_test_1234567890',
@@ -181,7 +181,7 @@ describe('ProcessPaymentUseCase', () => {
 
       expect(result.success).toBe(true);
       expect(result.data?.executionArn).toBeDefined();
-      expect(wompiAdapter.tokenizeCard).toHaveBeenCalledWith({
+      expect(gatewayAdapter.tokenizeCard).toHaveBeenCalledWith({
         number: '4242424242424242',
         cvc: '123',
         expMonth: '08',
@@ -271,7 +271,7 @@ describe('ProcessPaymentUseCase', () => {
       );
 
       transactionRepository.findById.mockResolvedValue(transaction);
-      wompiAdapter.tokenizeCard.mockResolvedValue({
+      gatewayAdapter.tokenizeCard.mockResolvedValue({
         status: 'FAILED',
         data: null as any,
       });
@@ -310,7 +310,7 @@ describe('ProcessPaymentUseCase', () => {
       );
 
       transactionRepository.findById.mockResolvedValue(transaction);
-      wompiAdapter.tokenizeCard.mockResolvedValue({
+      gatewayAdapter.tokenizeCard.mockResolvedValue({
         status: 'CREATED',
         data: {} as any, // No id field
       });
@@ -330,7 +330,26 @@ describe('ProcessPaymentUseCase', () => {
     });
 
     it('should handle errors gracefully', async () => {
-      transactionRepository.findById.mockRejectedValue(
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      transactionRepository.findById.mockResolvedValue(transaction);
+      gatewayAdapter.tokenizeCard.mockRejectedValue(
         new Error('Database error'),
       );
 
@@ -383,7 +402,7 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         transactionRepository.findById.mockResolvedValue(transaction);
-        wompiAdapter.tokenizeCard.mockResolvedValue({
+        gatewayAdapter.tokenizeCard.mockResolvedValue({
           status: 'CREATED',
           data: {
             id: 'tok_test_123',
@@ -405,13 +424,13 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         configService.get.mockImplementation((key: string) => {
-          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          if (key === 'GATEWAY_PUBLIC_KEY') return 'pub_test_key';
           return undefined;
         });
 
-        wompiAdapter.createPayment.mockResolvedValue({
+        gatewayAdapter.createPayment.mockResolvedValue({
           data: {
-            id: 'wompi-trans-123',
+            id: 'gateway-trans-123',
             status: 'APPROVED',
             amount_in_cents: 11800000,
             currency: 'COP',
@@ -446,7 +465,7 @@ describe('ProcessPaymentUseCase', () => {
           'Step Function not found in development, executing payment workflow directly',
           'ProcessPaymentUseCase',
         );
-        expect(wompiAdapter.createPayment).toHaveBeenCalled();
+        expect(gatewayAdapter.createPayment).toHaveBeenCalled();
         expect(updateInventoryUseCase.execute).toHaveBeenCalled();
       });
 
@@ -470,7 +489,7 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         transactionRepository.findById.mockResolvedValue(transaction);
-        wompiAdapter.tokenizeCard.mockResolvedValue({
+        gatewayAdapter.tokenizeCard.mockResolvedValue({
           status: 'CREATED',
           data: {
             id: 'tok_test_123',
@@ -492,11 +511,11 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         configService.get.mockImplementation((key: string) => {
-          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          if (key === 'GATEWAY_PUBLIC_KEY') return 'pub_test_key';
           return undefined;
         });
 
-        wompiAdapter.createPayment.mockRejectedValue(
+        gatewayAdapter.createPayment.mockRejectedValue(
           new Error('Payment failed'),
         );
 
@@ -540,7 +559,7 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         transactionRepository.findById.mockResolvedValue(transaction);
-        wompiAdapter.tokenizeCard.mockResolvedValue({
+        gatewayAdapter.tokenizeCard.mockResolvedValue({
           status: 'CREATED',
           data: {
             id: 'tok_test_123',
@@ -562,13 +581,13 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         configService.get.mockImplementation((key: string) => {
-          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          if (key === 'GATEWAY_PUBLIC_KEY') return 'pub_test_key';
           return undefined;
         });
 
-        wompiAdapter.createPayment.mockResolvedValue({
+        gatewayAdapter.createPayment.mockResolvedValue({
           data: {
-            id: 'wompi-trans-123',
+            id: 'gateway-trans-123',
             status: 'APPROVED',
             amount_in_cents: 11800000,
             currency: 'COP',
@@ -628,7 +647,7 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         transactionRepository.findById.mockResolvedValue(transaction);
-        wompiAdapter.tokenizeCard.mockResolvedValue({
+        gatewayAdapter.tokenizeCard.mockResolvedValue({
           status: 'CREATED',
           data: {
             id: 'tok_test_123',
@@ -650,12 +669,12 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         configService.get.mockImplementation((key: string) => {
-          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          if (key === 'GATEWAY_PUBLIC_KEY') return 'pub_test_key';
           return undefined;
         });
 
         // Make createPayment throw an error to simulate unexpected error
-        wompiAdapter.createPayment.mockRejectedValue(
+        gatewayAdapter.createPayment.mockRejectedValue(
           new Error('Unexpected error'),
         );
 
@@ -702,7 +721,7 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         transactionRepository.findById.mockResolvedValue(transaction);
-        wompiAdapter.tokenizeCard.mockResolvedValue({
+        gatewayAdapter.tokenizeCard.mockResolvedValue({
           status: 'CREATED',
           data: {
             id: 'tok_test_123',
@@ -762,9 +781,9 @@ describe('ProcessPaymentUseCase', () => {
 
       transactionRepository.findById.mockResolvedValue(transaction);
       configService.get.mockReturnValue('pub_test_key');
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'APPROVED',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -785,8 +804,8 @@ describe('ProcessPaymentUseCase', () => {
       );
 
       expect(result.success).toBe(true);
-      expect(wompiAdapter.createPayment).toHaveBeenCalled();
-      const createPaymentCall = wompiAdapter.createPayment.mock.calls[0][0];
+      expect(gatewayAdapter.createPayment).toHaveBeenCalled();
+      const createPaymentCall = gatewayAdapter.createPayment.mock.calls[0][0];
       expect(createPaymentCall.amountInCents).toBe(11800000);
       expect(createPaymentCall.currency).toBe('COP');
       expect(createPaymentCall.customerEmail).toBe('test@example.com');
@@ -795,15 +814,15 @@ describe('ProcessPaymentUseCase', () => {
       const updateCall = transactionRepository.update.mock.calls[0][0];
       expect(updateCall.id).toBe('trans-001');
       expect(updateCall.status).toBe(TransactionStatus.APPROVED);
-      expect(updateCall.wompiTransactionId).toBe('wompi-trans-123');
+      expect(updateCall.gatewayTransactionId).toBe('gateway-trans-123');
 
       expect(eventStore.storeEvent).toHaveBeenCalled();
       const storeEventCall = eventStore.storeEvent.mock.calls[0][0];
       expect(storeEventCall.aggregateId).toBe('trans-001');
       expect(storeEventCall.eventType).toBe('PaymentProcessed');
       expect(storeEventCall.eventData.transactionId).toBe('trans-001');
-      expect(storeEventCall.eventData.wompiTransactionId).toBe(
-        'wompi-trans-123',
+      expect(storeEventCall.eventData.gatewayTransactionId).toBe(
+        'gateway-trans-123',
       );
       expect(storeEventCall.eventData.status).toBe('APPROVED');
 
@@ -812,7 +831,7 @@ describe('ProcessPaymentUseCase', () => {
       expect(publishCall.eventType).toBe('PaymentProcessed');
       expect(publishCall.transactionId).toBe('trans-001');
       expect(publishCall.status).toBe('APPROVED');
-      expect(publishCall.wompiTransactionId).toBe('wompi-trans-123');
+      expect(publishCall.gatewayTransactionId).toBe('gateway-trans-123');
     });
 
     it('should handle declined payment', async () => {
@@ -836,9 +855,9 @@ describe('ProcessPaymentUseCase', () => {
 
       transactionRepository.findById.mockResolvedValue(transaction);
       configService.get.mockReturnValue('pub_test_key');
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'DECLINED',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -899,9 +918,9 @@ describe('ProcessPaymentUseCase', () => {
 
       transactionRepository.findById.mockResolvedValue(transaction);
       configService.get.mockReturnValue('pub_test_key');
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'VOIDED',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -949,9 +968,9 @@ describe('ProcessPaymentUseCase', () => {
 
       transactionRepository.findById.mockResolvedValue(transaction);
       configService.get.mockReturnValue('pub_test_key');
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'ERROR',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -998,9 +1017,9 @@ describe('ProcessPaymentUseCase', () => {
 
       transactionRepository.findById.mockResolvedValue(transaction);
       configService.get.mockReturnValue('pub_test_key');
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'PENDING',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1022,7 +1041,7 @@ describe('ProcessPaymentUseCase', () => {
       expect(result.data?.status).toBe('PENDING');
       expect(transactionRepository.update).toHaveBeenCalled();
       const updateCall = transactionRepository.update.mock.calls[0][0];
-      expect(updateCall.wompiTransactionId).toBe('wompi-trans-123');
+      expect(updateCall.gatewayTransactionId).toBe('gateway-trans-123');
     });
 
     it('should return error when transaction not found in executePaymentStep', async () => {
@@ -1059,7 +1078,9 @@ describe('ProcessPaymentUseCase', () => {
 
       transactionRepository.findById.mockResolvedValue(transaction);
       configService.get.mockReturnValue('pub_test_key');
-      wompiAdapter.createPayment.mockRejectedValue(new Error('Wompi error'));
+      gatewayAdapter.createPayment.mockRejectedValue(
+        new Error('Payment gateway error'),
+      );
 
       const result = await useCase.executePaymentStep(
         'trans-001',
@@ -1093,9 +1114,9 @@ describe('ProcessPaymentUseCase', () => {
 
       transactionRepository.findById.mockResolvedValue(transaction);
       configService.get.mockReturnValue('pub_test_key');
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'UNKNOWN_STATUS',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1117,7 +1138,7 @@ describe('ProcessPaymentUseCase', () => {
       // updatedTransaction will be undefined, so it will fall through to the PENDING flow
       expect(result.success).toBe(true);
       expect(result.data?.status).toBe('PENDING');
-      // Should still save wompiTransactionId even for unknown status
+      // Should still save gatewayTransactionId even for unknown status
       expect(transactionRepository.update).toHaveBeenCalled();
     });
 
@@ -1142,9 +1163,9 @@ describe('ProcessPaymentUseCase', () => {
 
       transactionRepository.findById.mockResolvedValue(transaction);
       configService.get.mockReturnValue('pub_test_key');
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'PENDING',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1201,9 +1222,9 @@ describe('ProcessPaymentUseCase', () => {
 
       transactionRepository.findById.mockResolvedValue(transaction);
       configService.get.mockReturnValue('pub_test_key');
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'PENDING',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1238,7 +1259,7 @@ describe('ProcessPaymentUseCase', () => {
       jest.restoreAllMocks();
     });
 
-    it('should handle error when saving wompiTransactionId for pending payment', async () => {
+    it('should handle error when saving gatewayTransactionId for pending payment', async () => {
       const transaction = new Transaction(
         'trans-001',
         'prod-001',
@@ -1259,9 +1280,9 @@ describe('ProcessPaymentUseCase', () => {
 
       transactionRepository.findById.mockResolvedValue(transaction);
       configService.get.mockReturnValue('pub_test_key');
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'PENDING',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1290,7 +1311,7 @@ describe('ProcessPaymentUseCase', () => {
     beforeEach(() => {
       configService.get.mockImplementation(
         (key: string, defaultValue?: any) => {
-          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          if (key === 'GATEWAY_PUBLIC_KEY') return 'pub_test_key';
           if (key === 'PAYMENT_POLLING_INTERVAL_MS') return 1;
           if (key === 'PAYMENT_POLLING_MAX_DURATION_MS') return 10000;
           return defaultValue;
@@ -1333,7 +1354,7 @@ describe('ProcessPaymentUseCase', () => {
         'idempotency-key-123',
         new Date(),
         new Date(),
-        'wompi-trans-123',
+        'gateway-trans-123',
       );
 
       // First call for initial findById, second for after polling
@@ -1342,9 +1363,9 @@ describe('ProcessPaymentUseCase', () => {
         .mockResolvedValueOnce(transaction)
         .mockResolvedValueOnce(approvedTransaction);
 
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'PENDING',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1358,9 +1379,9 @@ describe('ProcessPaymentUseCase', () => {
       transactionRepository.update.mockResolvedValue(undefined);
 
       // Polling returns APPROVED
-      (wompiAdapter as any).getPaymentStatus.mockResolvedValue({
+      (gatewayAdapter as any).getPaymentStatus.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'APPROVED',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1415,9 +1436,9 @@ describe('ProcessPaymentUseCase', () => {
         .mockResolvedValueOnce(transaction)
         .mockResolvedValueOnce(null);
 
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'PENDING',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1431,9 +1452,9 @@ describe('ProcessPaymentUseCase', () => {
       transactionRepository.update.mockResolvedValue(undefined);
 
       // Polling returns APPROVED
-      (wompiAdapter as any).getPaymentStatus.mockResolvedValue({
+      (gatewayAdapter as any).getPaymentStatus.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'APPROVED',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1484,15 +1505,15 @@ describe('ProcessPaymentUseCase', () => {
       );
 
       configService.get.mockImplementation((key: string) => {
-        if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+        if (key === 'GATEWAY_PUBLIC_KEY') return 'pub_test_key';
         return undefined;
       });
 
       transactionRepository.findById.mockResolvedValue(transaction);
 
-      wompiAdapter.createPayment.mockResolvedValue({
+      gatewayAdapter.createPayment.mockResolvedValue({
         data: {
-          id: 'wompi-trans-123',
+          id: 'gateway-trans-123',
           status: 'PENDING',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1513,16 +1534,35 @@ describe('ProcessPaymentUseCase', () => {
 
       expect(result.success).toBe(true);
       expect(result.data?.status).toBe('PENDING');
-      // Verify that wompiTransactionId was saved
+      // Verify that gatewayTransactionId was saved
       expect(transactionRepository.update).toHaveBeenCalled();
       const updateCall = transactionRepository.update.mock.calls[0][0];
-      expect(updateCall.wompiTransactionId).toBe('wompi-trans-123');
+      expect(updateCall.gatewayTransactionId).toBe('gateway-trans-123');
     });
   });
 
   describe('execute - additional branch coverage', () => {
     it('should handle non-Error exception in outer catch', async () => {
-      transactionRepository.findById.mockRejectedValue('string error');
+      const transaction = new Transaction(
+        'trans-001',
+        'prod-001',
+        100000,
+        3000,
+        15000,
+        118000,
+        TransactionStatus.PENDING,
+        'test@example.com',
+        'Test User',
+        'Test Address',
+        'Bogotá',
+        '+57 300 123 4567',
+        'idempotency-key-123',
+        new Date(),
+        new Date(),
+      );
+
+      transactionRepository.findById.mockResolvedValue(transaction);
+      gatewayAdapter.tokenizeCard.mockRejectedValue('string error');
 
       const result = await useCase.execute({
         transactionId: 'trans-001',
@@ -1577,7 +1617,7 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         transactionRepository.findById.mockResolvedValue(transaction);
-        wompiAdapter.tokenizeCard.mockResolvedValue({
+        gatewayAdapter.tokenizeCard.mockResolvedValue({
           status: 'CREATED',
           data: {
             id: 'tok_test_123',
@@ -1598,13 +1638,13 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         configService.get.mockImplementation((key: string) => {
-          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          if (key === 'GATEWAY_PUBLIC_KEY') return 'pub_test_key';
           return undefined;
         });
 
-        wompiAdapter.createPayment.mockResolvedValue({
+        gatewayAdapter.createPayment.mockResolvedValue({
           data: {
-            id: 'wompi-trans-123',
+            id: 'gateway-trans-123',
             status: 'APPROVED',
             amount_in_cents: 11800000,
             currency: 'COP',
@@ -1662,7 +1702,7 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         transactionRepository.findById.mockResolvedValue(transaction);
-        wompiAdapter.tokenizeCard.mockResolvedValue({
+        gatewayAdapter.tokenizeCard.mockResolvedValue({
           status: 'CREATED',
           data: {
             id: 'tok_test_123',
@@ -1683,13 +1723,13 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         configService.get.mockImplementation((key: string) => {
-          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          if (key === 'GATEWAY_PUBLIC_KEY') return 'pub_test_key';
           return undefined;
         });
 
-        wompiAdapter.createPayment.mockResolvedValue({
+        gatewayAdapter.createPayment.mockResolvedValue({
           data: {
-            id: 'wompi-trans-123',
+            id: 'gateway-trans-123',
             status: 'APPROVED',
             amount_in_cents: 11800000,
             currency: 'COP',
@@ -1750,7 +1790,7 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         transactionRepository.findById.mockResolvedValue(transaction);
-        wompiAdapter.tokenizeCard.mockResolvedValue({
+        gatewayAdapter.tokenizeCard.mockResolvedValue({
           status: 'CREATED',
           data: {
             id: 'tok_test_123',
@@ -1771,13 +1811,13 @@ describe('ProcessPaymentUseCase', () => {
         );
 
         configService.get.mockImplementation((key: string) => {
-          if (key === 'WOMPI_PUBLIC_KEY') return 'pub_test_key';
+          if (key === 'GATEWAY_PUBLIC_KEY') return 'pub_test_key';
           return undefined;
         });
 
-        wompiAdapter.createPayment.mockResolvedValue({
+        gatewayAdapter.createPayment.mockResolvedValue({
           data: {
-            id: 'wompi-trans-123',
+            id: 'gateway-trans-123',
             status: 'APPROVED',
             amount_in_cents: 11800000,
             currency: 'COP',
@@ -1838,7 +1878,7 @@ describe('ProcessPaymentUseCase', () => {
 
       transactionRepository.findById.mockResolvedValue(transaction);
       configService.get.mockReturnValue('pub_test_key');
-      wompiAdapter.createPayment.mockRejectedValue('non-error string');
+      gatewayAdapter.createPayment.mockRejectedValue('non-error string');
 
       const result = await useCase.executePaymentStep(
         'trans-001',
@@ -1889,9 +1929,9 @@ describe('ProcessPaymentUseCase', () => {
     it('should update transaction to APPROVED when polling detects approval', async () => {
       const transaction = createTransaction();
       transactionRepository.findById.mockResolvedValue(transaction);
-      (wompiAdapter as any).getPaymentStatus.mockResolvedValue({
+      (gatewayAdapter as any).getPaymentStatus.mockResolvedValue({
         data: {
-          id: 'wompi-123',
+          id: 'gateway-123',
           status: 'APPROVED',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1909,7 +1949,7 @@ describe('ProcessPaymentUseCase', () => {
         data: {},
       });
 
-      await (useCase as any).pollPaymentStatus('trans-001', 'wompi-123');
+      await (useCase as any).pollPaymentStatus('trans-001', 'gateway-123');
 
       expect(transactionRepository.update).toHaveBeenCalled();
       const updateCall = transactionRepository.update.mock.calls[0][0];
@@ -1925,9 +1965,9 @@ describe('ProcessPaymentUseCase', () => {
     it('should compensate when inventory update fails during polling after approval', async () => {
       const transaction = createTransaction();
       transactionRepository.findById.mockResolvedValue(transaction);
-      (wompiAdapter as any).getPaymentStatus.mockResolvedValue({
+      (gatewayAdapter as any).getPaymentStatus.mockResolvedValue({
         data: {
-          id: 'wompi-123',
+          id: 'gateway-123',
           status: 'APPROVED',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1948,7 +1988,7 @@ describe('ProcessPaymentUseCase', () => {
         success: true,
       });
 
-      await (useCase as any).pollPaymentStatus('trans-001', 'wompi-123');
+      await (useCase as any).pollPaymentStatus('trans-001', 'gateway-123');
 
       expect(compensateTransactionUseCase.execute).toHaveBeenCalledWith(
         'trans-001',
@@ -1964,9 +2004,9 @@ describe('ProcessPaymentUseCase', () => {
     it('should update transaction to DECLINED when polling detects decline', async () => {
       const transaction = createTransaction();
       transactionRepository.findById.mockResolvedValue(transaction);
-      (wompiAdapter as any).getPaymentStatus.mockResolvedValue({
+      (gatewayAdapter as any).getPaymentStatus.mockResolvedValue({
         data: {
-          id: 'wompi-123',
+          id: 'gateway-123',
           status: 'DECLINED',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -1981,7 +2021,7 @@ describe('ProcessPaymentUseCase', () => {
       eventStore.storeEvent.mockResolvedValue(undefined);
       snsService.publish.mockResolvedValue(undefined);
 
-      await (useCase as any).pollPaymentStatus('trans-001', 'wompi-123');
+      await (useCase as any).pollPaymentStatus('trans-001', 'gateway-123');
 
       expect(transactionRepository.update).toHaveBeenCalled();
       const updateCall = transactionRepository.update.mock.calls[0][0];
@@ -1992,9 +2032,9 @@ describe('ProcessPaymentUseCase', () => {
     it('should use default decline message when status_message is undefined', async () => {
       const transaction = createTransaction();
       transactionRepository.findById.mockResolvedValue(transaction);
-      (wompiAdapter as any).getPaymentStatus.mockResolvedValue({
+      (gatewayAdapter as any).getPaymentStatus.mockResolvedValue({
         data: {
-          id: 'wompi-123',
+          id: 'gateway-123',
           status: 'DECLINED',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -2008,7 +2048,7 @@ describe('ProcessPaymentUseCase', () => {
       eventStore.storeEvent.mockResolvedValue(undefined);
       snsService.publish.mockResolvedValue(undefined);
 
-      await (useCase as any).pollPaymentStatus('trans-001', 'wompi-123');
+      await (useCase as any).pollPaymentStatus('trans-001', 'gateway-123');
 
       const updateCall = transactionRepository.update.mock.calls[0][0];
       expect(updateCall.errorMessage).toBe('Payment declined');
@@ -2016,9 +2056,9 @@ describe('ProcessPaymentUseCase', () => {
 
     it('should handle transaction not found during polling', async () => {
       transactionRepository.findById.mockResolvedValue(null);
-      (wompiAdapter as any).getPaymentStatus.mockResolvedValue({
+      (gatewayAdapter as any).getPaymentStatus.mockResolvedValue({
         data: {
-          id: 'wompi-123',
+          id: 'gateway-123',
           status: 'APPROVED',
           amount_in_cents: 11800000,
           currency: 'COP',
@@ -2029,7 +2069,7 @@ describe('ProcessPaymentUseCase', () => {
         },
       });
 
-      await (useCase as any).pollPaymentStatus('trans-001', 'wompi-123');
+      await (useCase as any).pollPaymentStatus('trans-001', 'gateway-123');
 
       expect(logger.error).toHaveBeenCalledWith(
         'Transaction trans-001 not found during polling',
@@ -2047,11 +2087,11 @@ describe('ProcessPaymentUseCase', () => {
         },
       );
 
-      (wompiAdapter as any).getPaymentStatus.mockRejectedValue(
+      (gatewayAdapter as any).getPaymentStatus.mockRejectedValue(
         'non-error string',
       );
 
-      await (useCase as any).pollPaymentStatus('trans-001', 'wompi-123');
+      await (useCase as any).pollPaymentStatus('trans-001', 'gateway-123');
 
       expect(logger.error).toHaveBeenCalledWith(
         expect.stringContaining('Error polling payment status'),
@@ -2069,11 +2109,11 @@ describe('ProcessPaymentUseCase', () => {
         },
       );
 
-      (wompiAdapter as any).getPaymentStatus.mockRejectedValue(
+      (gatewayAdapter as any).getPaymentStatus.mockRejectedValue(
         new Error('Network error'),
       );
 
-      await (useCase as any).pollPaymentStatus('trans-001', 'wompi-123');
+      await (useCase as any).pollPaymentStatus('trans-001', 'gateway-123');
 
       expect(logger.error).toHaveBeenCalledWith(
         expect.stringContaining('Error polling payment status'),
@@ -2091,11 +2131,11 @@ describe('ProcessPaymentUseCase', () => {
         },
       );
 
-      (wompiAdapter as any).getPaymentStatus.mockResolvedValue({
+      (gatewayAdapter as any).getPaymentStatus.mockResolvedValue({
         data: { status: 'PENDING' },
       });
 
-      await (useCase as any).pollPaymentStatus('trans-001', 'wompi-123');
+      await (useCase as any).pollPaymentStatus('trans-001', 'gateway-123');
 
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Payment polling timeout reached'),

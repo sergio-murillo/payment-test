@@ -37,7 +37,7 @@ export const validateTransactionHandler = async (event: any) => {
 };
 
 /**
- * Processes the payment with Wompi
+ * Processes the payment with payment gateway
  */
 export const processPaymentHandler = async (event: any) => {
   const { processPaymentUseCase } = await getNestJsContext();
@@ -64,10 +64,10 @@ export const processPaymentHandler = async (event: any) => {
 
   // Extract status from result
   const transaction = result.data?.transaction;
-  const wompiResponse = result.data?.wompiResponse;
-  const status = wompiResponse?.status || transaction?.status || 'PENDING';
-  const wompiTransactionId =
-    wompiResponse?.id || transaction?.wompiTransactionId;
+  const gatewayResponse = result.data?.gatewayResponse;
+  const status = gatewayResponse?.status || transaction?.status || 'PENDING';
+  const gatewayTransactionId =
+    gatewayResponse?.id || transaction?.gatewayTransactionId;
 
   // Get productId from transaction or input (it should be in input from validateTransactionHandler)
   const productId =
@@ -77,7 +77,7 @@ export const processPaymentHandler = async (event: any) => {
   return {
     ...input,
     transactionId,
-    wompiTransactionId,
+    gatewayTransactionId,
     status,
     productId,
   };

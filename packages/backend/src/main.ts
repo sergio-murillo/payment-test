@@ -32,8 +32,8 @@ export const handler = async (event: any, context: any) => {
     });
 
     const config = new DocumentBuilder()
-      .setTitle('Wompi Payments API')
-      .setDescription('API for processing payments with Wompi')
+      .setTitle('Payments API')
+      .setDescription('API for processing payments')
       .setVersion('1.0')
       .addBearerAuth()
       .build();
@@ -69,8 +69,8 @@ async function bootstrap() {
   });
 
   const config = new DocumentBuilder()
-    .setTitle('Wompi Payments API')
-    .setDescription('API for processing payments with Wompi')
+    .setTitle('Payments API')
+    .setDescription('API for processing payments')
     .setVersion('1.0')
     .addBearerAuth()
     .build();

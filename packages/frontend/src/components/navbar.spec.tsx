@@ -30,13 +30,13 @@ describe('Navbar', () => {
   it('should render navbar with brand', () => {
     render(<Navbar />);
 
-    expect(screen.getByText('Wompi Store')).toBeInTheDocument();
+    expect(screen.getByText('Payment Store')).toBeInTheDocument();
   });
 
   it('should navigate to home when brand is clicked', () => {
     render(<Navbar />);
 
-    const brand = screen.getByText('Wompi Store').closest('div');
+    const brand = screen.getByText('Payment Store').closest('div');
     brand?.click();
 
     expect(mockPush).toHaveBeenCalledWith('/');
@@ -45,7 +45,7 @@ describe('Navbar', () => {
   it('should navigate to home when Enter is pressed on brand', () => {
     render(<Navbar />);
 
-    const brand = screen.getByText('Wompi Store').closest('[role="button"]')!;
+    const brand = screen.getByText('Payment Store').closest('[role="button"]')!;
     fireEvent.keyDown(brand, { key: 'Enter' });
 
     expect(mockPush).toHaveBeenCalledWith('/');
@@ -54,7 +54,7 @@ describe('Navbar', () => {
   it('should not navigate when non-Enter key is pressed on brand', () => {
     render(<Navbar />);
 
-    const brand = screen.getByText('Wompi Store').closest('[role="button"]')!;
+    const brand = screen.getByText('Payment Store').closest('[role="button"]')!;
     fireEvent.keyDown(brand, { key: 'Space' });
 
     expect(mockPush).not.toHaveBeenCalled();

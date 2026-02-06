@@ -1,1 +1,1 @@
-export const WOMPI_PAYMENT_ADAPTER_TOKEN = 'WompiPaymentAdapter';
+export const PAYMENT_GATEWAY_ADAPTER_TOKEN = 'PaymentGatewayAdapter';

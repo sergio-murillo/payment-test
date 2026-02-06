@@ -2,12 +2,12 @@ import { Module } from '@nestjs/common';
 import { PaymentsController } from './payments.controller';
 import { ProcessPaymentUseCase } from './application/process-payment.use-case';
 import { CompensateTransactionUseCase } from './application/compensate-transaction.use-case';
-import { WompiApiAdapter } from './infrastructure/wompi-api.adapter';
+import { PaymentGatewayAdapter } from './infrastructure/payment-gateway.adapter';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { EventStoreModule } from '../event-store/event-store.module';
 import { SharedModule } from '../shared/shared.module';
-import { WOMPI_PAYMENT_ADAPTER_TOKEN } from './payments.tokens';
+import { PAYMENT_GATEWAY_ADAPTER_TOKEN } from './payments.tokens';
 
 @Module({
   imports: [
@@ -20,14 +20,14 @@ import { WOMPI_PAYMENT_ADAPTER_TOKEN } from './payments.tokens';
   providers: [
     ProcessPaymentUseCase,
     CompensateTransactionUseCase,
-    WompiApiAdapter,
+    PaymentGatewayAdapter,
     {
-      provide: WOMPI_PAYMENT_ADAPTER_TOKEN,
-      useClass: WompiApiAdapter,
+      provide: PAYMENT_GATEWAY_ADAPTER_TOKEN,
+      useClass: PaymentGatewayAdapter,
     },
   ],
   exports: [
-    WOMPI_PAYMENT_ADAPTER_TOKEN,
+    PAYMENT_GATEWAY_ADAPTER_TOKEN,
     ProcessPaymentUseCase,
     CompensateTransactionUseCase,
   ],

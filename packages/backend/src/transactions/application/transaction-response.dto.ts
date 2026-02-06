@@ -73,11 +73,11 @@ export class TransactionResponseDto {
   updatedAt: string;
 
   @ApiProperty({
-    description: 'ID de la transacción en Wompi',
-    example: 'wompi-trans-12345',
+    description: 'ID de la transacción en la pasarela de pagos',
+    example: 'gateway-trans-12345',
     required: false,
   })
-  wompiTransactionId?: string;
+  gatewayTransactionId?: string;
 
   @ApiProperty({
     description: 'Mensaje de error si la transacción fue declinada',

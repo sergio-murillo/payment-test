@@ -310,7 +310,7 @@ All files                            |   97.33 |    83.89 |   95.96 |   97.63 |
   compensate-transaction.use-case.ts |     100 |    66.66 |     100 |     100 |                
   process-payment.use-case.ts        |     100 |      100 |     100 |     100 |                   
  payments/infrastructure             |   96.66 |    85.71 |     100 |   96.55 |                   
-  wompi-api.adapter.ts               |   96.66 |    85.71 |     100 |   96.55 |          
+  payment-gateway.adapter.ts               |   96.66 |    85.71 |     100 |   96.55 |          
  payments/lambdas                    |       0 |      100 |       0 |       0 |                   
   step-functions-handlers.ts         |       0 |      100 |       0 |       0 |           
  products                            |     100 |    69.23 |     100 |     100 |                   
@@ -421,8 +421,8 @@ http://localhost:3001/api
 
 La colección completa de Postman está disponible en `docs/postman/`:
 
-- **Colección**: `docs/postman/Wompi-Payments-API.postman_collection.json`
-- **Entorno Local**: `docs/postman/Wompi-Payments-API.postman_environment.json`
+- **Colección**: `docs/postman/Payments-API.postman_collection.json`
+- **Entorno Local**: `docs/postman/Payments-API.postman_environment.json`
 
 La colección incluye:
 - ✅ Todos los endpoints documentados
@@ -469,7 +469,7 @@ Attributes:
   - deliveryAddress
   - deliveryCity
   - deliveryPhone
-  - wompiTransactionId
+  - gatewayTransactionId
   - createdAt
   - updatedAt
   - errorMessage
@@ -522,13 +522,13 @@ app.enableCors({
 
 | Control | Estado | Detalle |
 |---|---|---|
-| Firma de integridad SHA256 | ✅ | Hash HMAC para validar transacciones Wompi (`wompi-api.adapter.ts`) |
-| Secretos en variables de entorno | ✅ | `WOMPI_PRIVATE_KEY`, `WOMPI_INTEGRITY_SECRET` nunca en código fuente |
-| No almacenamiento de datos de tarjeta | ✅ | Tokenización vía API Wompi; datos sensibles no persisten |
+| Firma de integridad SHA256 | ✅ | Hash HMAC para validar transacciones de pago (`payment-gateway.adapter.ts`) |
+| Secretos en variables de entorno | ✅ | `GATEWAY_PRIVATE_KEY`, `GATEWAY_INTEGRITY_SECRET` nunca en código fuente |
+| No almacenamiento de datos de tarjeta | ✅ | Tokenización vía API de pagos; datos sensibles no persisten |
 
 **Implementación:**
 ```typescript
-// wompi-api.adapter.ts
+// payment-gateway.adapter.ts
 private calculateSignature(reference: string, amountInCents: number, currency: string): string {
   const dataToSign = `${reference}${amountInCents}${currency}${this.integritySecret}`;
   return crypto.createHash('sha256').update(dataToSign).digest('hex');
@@ -623,7 +623,7 @@ if (existingTransaction) {
 | Control | Estado | Detalle |
 |---|---|---|
 | API Keys separadas por responsabilidad | ✅ | `publicKey` para tokenización, `privateKey` para pagos |
-| Bearer Token Authentication | ✅ | Headers `Authorization: Bearer` en todas las llamadas a Wompi |
+| Bearer Token Authentication | ✅ | Headers `Authorization: Bearer` en todas las llamadas a la pasarela de pagos |
 | Credenciales inyectadas por ConfigService | ✅ | Nunca hardcodeadas en código fuente |
 
 ---
@@ -676,7 +676,7 @@ if (status >= 500) {
 
 | Control | Estado | Detalle |
 |---|---|---|
-| URLs de API fijas por configuración | ✅ | `WOMPI_API_URL` desde variable de entorno, no de input del usuario |
+| URLs de API fijas por configuración | ✅ | `GATEWAY_API_URL` desde variable de entorno, no de input del usuario |
 | Axios con baseURL fija | ✅ | Instancia con URL base predefinida, sin URLs dinámicas |
 | Frontend con API endpoint fijo | ✅ | `NEXT_PUBLIC_API_URL` configurado en build time |
 

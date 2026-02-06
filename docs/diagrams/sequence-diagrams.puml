@@ -1,5 +1,5 @@
 @startuml Flujo Completo de Pago
-title Flujo Completo de Pago - Cliente a Wompi (Actualizado)
+title Flujo Completo de Pago - Cliente a Payment Gateway (Actualizado)
 
 actor Cliente
 participant Frontend
@@ -14,8 +14,8 @@ participant "EventStoreService" as ES
 participant "PaymentsController" as PayC
 participant "ProcessPaymentUseCase" as PPU
 participant "StepFunctionsService" as SFS
-participant "WompiPaymentAdapter" as WPA
-participant "Wompi API" as Wompi
+participant "PaymentGatewayAdapter" as WPA
+participant "Payment Gateway API" as Gateway
 participant "UpdateInventoryUseCase" as UIU
 participant "InventoryRepository" as IR
 participant "CompensateTransactionUseCase" as CTUComp
@@ -62,8 +62,8 @@ TR --> PPU: Transaction
 
 == Tokenización de Tarjeta ==
 PPU -> WPA: tokenizeCard(cardData)
-WPA -> Wompi: POST /v1/tokens/cards\n(Authorization: public_key)
-Wompi --> WPA: Token Response
+WPA -> Gateway: POST /v1/tokens/cards\n(Authorization: public_key)
+Gateway --> WPA: Token Response
 WPA --> PPU: paymentToken
 
 alt Tokenización fallida
@@ -81,21 +81,21 @@ PayC --> Frontend: Payment processing started
 
 == Step Function: Procesar Pago ==
         SFS -> WPA: createPayment(paymentToken, transactionData)
-        WPA -> Wompi: GET /merchants/:public_key
-        Wompi --> WPA: acceptance_token
+        WPA -> Gateway: GET /merchants/:public_key
+        Gateway --> WPA: acceptance_token
         WPA -> WPA: calculateSignature()
-WPA -> Wompi: POST /transactions
-Wompi --> WPA: Payment Response
+WPA -> Gateway: POST /transactions
+Gateway --> WPA: Payment Response
 WPA --> SFS: Payment Result
         
         alt Pago PENDING (asíncrono)
-            SFS -> TR: update(transaction.setWompiTransactionId())
-            SFS -> PPU: pollPaymentStatus(wompiTransactionId)
+            SFS -> TR: update(transaction.setGatewayTransactionId())
+            SFS -> PPU: pollPaymentStatus(gatewayTransactionId)
             note right of PPU: Polling cada 10s\nhasta 2 minutos
             loop Polling de estado
-                PPU -> WPA: getPaymentStatus(wompiTransactionId)
-                WPA -> Wompi: GET /v1/transactions/:id
-                Wompi --> WPA: Payment Status
+                PPU -> WPA: getPaymentStatus(gatewayTransactionId)
+                WPA -> Gateway: GET /v1/transactions/:id
+                Gateway --> WPA: Payment Status
                 WPA --> PPU: Status Response
                 alt Status != PENDING
                     PPU -> TR: update(transaction con estado final)
@@ -125,20 +125,20 @@ else Pago Declinado
         note right of PPU: Fallback: ejecución directa\nen desarrollo
         PPU -> PPU: executePaymentStep()
         PPU -> WPA: createPayment(paymentToken, transactionData)
-        WPA -> Wompi: GET /merchants/:public_key
-        Wompi --> WPA: acceptance_token
+        WPA -> Gateway: GET /merchants/:public_key
+        Gateway --> WPA: acceptance_token
         WPA -> WPA: calculateSignature()
-        WPA -> Wompi: POST /transactions
-        Wompi --> WPA: Payment Response
+        WPA -> Gateway: POST /transactions
+        Gateway --> WPA: Payment Response
         
         alt Pago PENDING (asíncrono)
-            PPU -> TR: update(transaction.setWompiTransactionId())
-            PPU -> PPU: pollPaymentStatus(wompiTransactionId)
+            PPU -> TR: update(transaction.setGatewayTransactionId())
+            PPU -> PPU: pollPaymentStatus(gatewayTransactionId)
             note right of PPU: Polling cada 10s\nhasta 2 minutos
             loop Polling de estado
-                PPU -> WPA: getPaymentStatus(wompiTransactionId)
-                WPA -> Wompi: GET /v1/transactions/:id
-                Wompi --> WPA: Payment Status
+                PPU -> WPA: getPaymentStatus(gatewayTransactionId)
+                WPA -> Gateway: GET /v1/transactions/:id
+                Gateway --> WPA: Payment Status
                 WPA --> PPU: Status Response
                 alt Status != PENDING
                     PPU -> TR: update(transaction con estado final)
@@ -445,8 +445,8 @@ title Orquestación con AWS Step Functions (con Fallback)
 participant "ProcessPaymentUseCase" as PPU
 participant "StepFunctionsService" as SFS
 participant "Step Function" as SF
-participant "WompiPaymentAdapter" as WPA
-participant "Wompi API" as Wompi
+participant "PaymentGatewayAdapter" as WPA
+participant "Payment Gateway API" as Gateway
 participant "UpdateInventoryUseCase" as UIU
 participant "CompensateTransactionUseCase" as CTU
 
@@ -456,18 +456,18 @@ PPU -> SFS: startExecution(paymentData)
 SFS -> SF: Start execution
 
 SF -> WPA: createPayment(paymentToken, transactionData)
-WPA -> Wompi: GET /merchants/:public_key
-Wompi --> WPA: acceptance_token
+WPA -> Gateway: GET /merchants/:public_key
+Gateway --> WPA: acceptance_token
 WPA -> WPA: calculateSignature()
-WPA -> Wompi: POST /transactions
-Wompi --> WPA: Payment Response
+WPA -> Gateway: POST /transactions
+Gateway --> WPA: Payment Response
 
 alt Pago PENDING (asíncrono)
-    SF -> PPU: pollPaymentStatus(wompiTransactionId)
+    SF -> PPU: pollPaymentStatus(gatewayTransactionId)
     loop Polling cada 10s hasta 2 minutos
-        PPU -> WPA: getPaymentStatus(wompiTransactionId)
-        WPA -> Wompi: GET /v1/transactions/:id
-        Wompi --> WPA: Payment Status
+        PPU -> WPA: getPaymentStatus(gatewayTransactionId)
+        WPA -> Gateway: GET /v1/transactions/:id
+        Gateway --> WPA: Payment Status
         WPA --> PPU: Status Response
         alt Status != PENDING
             PPU -> PPU: Stop polling
@@ -498,18 +498,18 @@ SFS --> PPU: Error (Step Function no encontrada)
 
 PPU -> PPU: executePaymentStep() (fallback)
 PPU -> WPA: createPayment(paymentToken, transactionData)
-WPA -> Wompi: GET /merchants/:public_key
-Wompi --> WPA: acceptance_token
+WPA -> Gateway: GET /merchants/:public_key
+Gateway --> WPA: acceptance_token
 WPA -> WPA: calculateSignature()
-WPA -> Wompi: POST /transactions
-Wompi --> WPA: Payment Response
+WPA -> Gateway: POST /transactions
+Gateway --> WPA: Payment Response
 
 alt Pago PENDING (asíncrono)
-    PPU -> PPU: pollPaymentStatus(wompiTransactionId)
+    PPU -> PPU: pollPaymentStatus(gatewayTransactionId)
     loop Polling cada 10s hasta 2 minutos
-        PPU -> WPA: getPaymentStatus(wompiTransactionId)
-        WPA -> Wompi: GET /v1/transactions/:id
-        Wompi --> WPA: Payment Status
+        PPU -> WPA: getPaymentStatus(gatewayTransactionId)
+        WPA -> Gateway: GET /v1/transactions/:id
+        Gateway --> WPA: Payment Status
         WPA --> PPU: Status Response
         alt Status != PENDING
             PPU -> PPU: Stop polling
