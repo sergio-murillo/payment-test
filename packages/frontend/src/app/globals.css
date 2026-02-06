@@ -1,7 +1,15 @@
+/*
+ * Browser support: Chrome, Firefox, Safari 14.1+, Edge.
+ */
 * {
   box-sizing: border-box;
   padding: 0;
   margin: 0;
+}
+
+html {
+  height: 100%;
+  min-height: -webkit-fill-available;
 }
 
 html,
@@ -18,6 +26,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #f0f9ff 100%);
   min-height: 100vh;
+  min-height: -webkit-fill-available;
   padding-top: 60px;
 }
 
