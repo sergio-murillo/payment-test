@@ -17,11 +17,11 @@ provider:
     DYNAMODB_TABLE_PREFIX: ${self:provider.stage}
     SNS_TOPIC_ARN: !Ref PaymentsTopic
     SQS_QUEUE_URL: !Ref PaymentsQueue
-    STEP_FUNCTION_ARN: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:WompiPaymentProcessor-${self:provider.stage}"
-    WOMPI_API_URL: ${env:WOMPI_API_URL, 'https://api-sandbox.co.uat.wompi.dev/v1'}
-    WOMPI_PUBLIC_KEY: ${env:WOMPI_PUBLIC_KEY}
-    WOMPI_PRIVATE_KEY: ${env:WOMPI_PRIVATE_KEY}
-    WOMPI_INTEGRITY_SECRET: ${env:WOMPI_INTEGRITY_SECRET}
+    STEP_FUNCTION_ARN: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:PaymentProcessor-${self:provider.stage}"
+    GATEWAY_API_URL: ${env:GATEWAY_API_URL, 'https://api-sandbox.co.uat.gateway.dev/v1'}
+    GATEWAY_PUBLIC_KEY: ${env:GATEWAY_PUBLIC_KEY}
+    GATEWAY_PRIVATE_KEY: ${env:GATEWAY_PRIVATE_KEY}
+    GATEWAY_INTEGRITY_SECRET: ${env:GATEWAY_INTEGRITY_SECRET}
     PAYMENT_POLLING_INTERVAL_MS: ${env:PAYMENT_POLLING_INTERVAL_MS, '10000'}
     PAYMENT_POLLING_MAX_DURATION_MS: ${env:PAYMENT_POLLING_MAX_DURATION_MS, '120000'}
     FRONTEND_URL: ${env:FRONTEND_URL, 'd2iz29zdtykupj.cloudfront.net'}
@@ -61,7 +61,7 @@ provider:
             - states:DescribeExecution
             - states:StopExecution
           Resource:
-            - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:WompiPaymentProcessor-${self:provider.stage}"
+            - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:PaymentProcessor-${self:provider.stage}"
 
 package:
   patterns:
@@ -77,10 +77,10 @@ custom:
     path: .env
     basePath: ./
     include:
-      - WOMPI_PUBLIC_KEY
-      - WOMPI_PRIVATE_KEY
-      - WOMPI_INTEGRITY_SECRET
-      - WOMPI_API_URL
+      - GATEWAY_PUBLIC_KEY
+      - GATEWAY_PRIVATE_KEY
+      - GATEWAY_INTEGRITY_SECRET
+      - GATEWAY_API_URL
       - PAYMENT_POLLING_INTERVAL_MS
       - PAYMENT_POLLING_MAX_DURATION_MS
       - FRONTEND_URL
@@ -232,17 +232,17 @@ resources:
       Type: AWS::SNS::Topic
       Properties:
         TopicName: ${self:provider.environment.DYNAMODB_TABLE_PREFIX}-payments-events
-        DisplayName: Wompi Payments Events
+        DisplayName: Payment Events
 
     PaymentProcessorStateMachine:
       Type: AWS::StepFunctions::StateMachine
       Properties:
-        StateMachineName: WompiPaymentProcessor-${self:provider.stage}
+        StateMachineName: PaymentProcessor-${self:provider.stage}
         DefinitionString:
           Fn::Sub:
             - |
               {
-                "Comment": "Wompi Payment Processing Workflow",
+                "Comment": "Payment Processing Workflow",
                 "StartAt": "ValidateTransaction",
                 "States": {
                   "ValidateTransaction": {

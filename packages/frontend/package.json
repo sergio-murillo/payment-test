@@ -1,5 +1,5 @@
 {
-  "name": "@wompi-payments/frontend",
+  "name": "@payment-gateway/frontend",
   "version": "1.0.0",
   "private": true,
   "scripts": {

@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { WompiApiAdapter } from './wompi-api.adapter';
+import { PaymentGatewayAdapter } from './payment-gateway.adapter';
 import { LoggerService } from '../../shared/logger/logger.service';
 import axios from 'axios';
 
@@ -8,8 +8,8 @@ import axios from 'axios';
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
-describe('WompiApiAdapter', () => {
-  let adapter: WompiApiAdapter;
+describe('PaymentGatewayAdapter', () => {
+  let adapter: PaymentGatewayAdapter;
   let logger: jest.Mocked<LoggerService>;
   let axiosInstance: any;
 
@@ -20,10 +20,10 @@ describe('WompiApiAdapter', () => {
     const mockConfigService = {
       get: jest.fn((key: string, defaultValue?: string) => {
         const config: Record<string, string> = {
-          WOMPI_API_URL: 'https://api-sandbox.co.uat.wompi.dev/v1',
-          WOMPI_PUBLIC_KEY: 'pub_test_key',
-          WOMPI_PRIVATE_KEY: 'prv_test_key',
-          WOMPI_INTEGRITY_SECRET: 'test_integrity_secret',
+          GATEWAY_API_URL: 'https://api-sandbox.co.uat.gateway.dev/v1',
+          GATEWAY_PUBLIC_KEY: 'pub_test_key',
+          GATEWAY_PRIVATE_KEY: 'prv_test_key',
+          GATEWAY_INTEGRITY_SECRET: 'test_integrity_secret',
         };
         return config[key] || defaultValue;
       }),
@@ -47,7 +47,7 @@ describe('WompiApiAdapter', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        WompiApiAdapter,
+        PaymentGatewayAdapter,
         {
           provide: ConfigService,
           useValue: mockConfigService,
@@ -59,7 +59,7 @@ describe('WompiApiAdapter', () => {
       ],
     }).compile();
 
-    adapter = module.get<WompiApiAdapter>(WompiApiAdapter);
+    adapter = module.get<PaymentGatewayAdapter>(PaymentGatewayAdapter);
     logger = module.get(LoggerService);
   });
 
@@ -116,7 +116,7 @@ describe('WompiApiAdapter', () => {
       axiosInstance.get.mockRejectedValue(error);
 
       await expect(adapter.getAcceptanceToken()).rejects.toThrow(
-        'Wompi API error getting acceptance token',
+        'Payment gateway error getting acceptance token',
       );
       expect(logger.error).toHaveBeenCalled();
     });
@@ -200,7 +200,7 @@ describe('WompiApiAdapter', () => {
       axiosInstance.post.mockRejectedValue(error);
 
       await expect(adapter.tokenizeCard(cardData)).rejects.toThrow(
-        'Wompi API error tokenizing card',
+        'Payment gateway error tokenizing card',
       );
       expect(logger.error).toHaveBeenCalled();
     });
@@ -234,7 +234,7 @@ describe('WompiApiAdapter', () => {
       const mockPaymentResponse = {
         data: {
           data: {
-            id: 'wompi_trans_123',
+            id: 'gateway_trans_123',
             status: 'PENDING',
             amount_in_cents: 50000,
             currency: 'COP',
@@ -251,7 +251,7 @@ describe('WompiApiAdapter', () => {
 
       const result = await adapter.createPayment(paymentData);
 
-      expect(result.data.id).toBe('wompi_trans_123');
+      expect(result.data.id).toBe('gateway_trans_123');
       expect(result.data.status).toBe('PENDING');
       expect(axiosInstance.get).toHaveBeenCalledWith('/merchants/pub_test_key');
       expect(axiosInstance.post).toHaveBeenCalledWith(
@@ -306,7 +306,7 @@ describe('WompiApiAdapter', () => {
       const mockPaymentResponse = {
         data: {
           data: {
-            id: 'wompi_trans_123',
+            id: 'gateway_trans_123',
             status: 'PENDING',
           },
         },
@@ -360,7 +360,7 @@ describe('WompiApiAdapter', () => {
       axiosInstance.post.mockRejectedValue(error);
 
       await expect(adapter.createPayment(paymentData)).rejects.toThrow(
-        'Wompi API error',
+        'Payment gateway error',
       );
       expect(logger.error).toHaveBeenCalled();
     });
@@ -368,7 +368,7 @@ describe('WompiApiAdapter', () => {
 
   describe('getPaymentStatus', () => {
     it('should get payment status successfully', async () => {
-      const transactionId = 'wompi_trans_123';
+      const transactionId = 'gateway_trans_123';
       const mockResponse = {
         data: {
           data: {
@@ -404,7 +404,7 @@ describe('WompiApiAdapter', () => {
     });
 
     it('should handle API errors', async () => {
-      const transactionId = 'wompi_trans_123';
+      const transactionId = 'gateway_trans_123';
       const error = {
         response: {
           data: { error: 'Transaction not found' },
@@ -414,13 +414,13 @@ describe('WompiApiAdapter', () => {
       axiosInstance.get.mockRejectedValue(error);
 
       await expect(adapter.getPaymentStatus(transactionId)).rejects.toThrow(
-        'Wompi API error',
+        'Payment gateway error',
       );
       expect(logger.error).toHaveBeenCalled();
     });
 
     it('should handle network errors', async () => {
-      const transactionId = 'wompi_trans_123';
+      const transactionId = 'gateway_trans_123';
       const error = new Error('Network error');
       axiosInstance.get.mockRejectedValue(error);
 

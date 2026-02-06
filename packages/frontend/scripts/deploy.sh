@@ -2,7 +2,7 @@
 set -euo pipefail
 
 #
-# Deploy del frontend Wompi Store a S3 + CloudFront via Serverless Framework
+# Deploy del frontend Payment Store a S3 + CloudFront via Serverless Framework
 #
 # Uso:
 #   ./scripts/deploy.sh                          # deploy a dev
@@ -51,7 +51,7 @@ export NEXT_PUBLIC_API_URL
 export NEXT_EXPORT=true
 
 info "=========================================="
-info " Wompi Store Frontend - Deploy"
+info " Payment Store Frontend - Deploy"
 info "=========================================="
 info " Stage:    $STAGE"
 info " API URL:  $NEXT_PUBLIC_API_URL"

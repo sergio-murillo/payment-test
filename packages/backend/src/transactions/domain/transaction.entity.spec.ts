@@ -38,7 +38,7 @@ describe('Transaction Entity', () => {
     it('should handle optional fields', () => {
       const data = {
         ...baseTransactionData,
-        wompiTransactionId: 'wompi-123',
+        gatewayTransactionId: 'gateway-123',
         errorMessage: 'Test error',
         createdAt: baseTransactionData.createdAt.toISOString(),
         updatedAt: baseTransactionData.updatedAt.toISOString(),
@@ -46,7 +46,7 @@ describe('Transaction Entity', () => {
 
       const transaction = Transaction.fromPersistence(data);
 
-      expect(transaction.wompiTransactionId).toBe('wompi-123');
+      expect(transaction.gatewayTransactionId).toBe('gateway-123');
       expect(transaction.errorMessage).toBe('Test error');
     });
   });
@@ -100,7 +100,7 @@ describe('Transaction Entity', () => {
 
       const data = transaction.toPersistence();
 
-      expect(data).not.toHaveProperty('wompiTransactionId');
+      expect(data).not.toHaveProperty('gatewayTransactionId');
       expect(data).not.toHaveProperty('errorMessage');
     });
 
@@ -121,19 +121,19 @@ describe('Transaction Entity', () => {
         baseTransactionData.idempotencyKey,
         baseTransactionData.createdAt,
         baseTransactionData.updatedAt,
-        'wompi-123',
+        'gateway-123',
         'Test error',
       );
 
       const data = transaction.toPersistence();
 
-      expect(data.wompiTransactionId).toBe('wompi-123');
+      expect(data.gatewayTransactionId).toBe('gateway-123');
       expect(data.errorMessage).toBe('Test error');
     });
   });
 
   describe('approve', () => {
-    it('should create approved transaction with wompiTransactionId', () => {
+    it('should create approved transaction with gatewayTransactionId', () => {
       const transaction = new Transaction(
         baseTransactionData.id,
         baseTransactionData.productId,
@@ -152,10 +152,10 @@ describe('Transaction Entity', () => {
         baseTransactionData.updatedAt,
       );
 
-      const approved = transaction.approve('wompi-123');
+      const approved = transaction.approve('gateway-123');
 
       expect(approved.status).toBe(TransactionStatus.APPROVED);
-      expect(approved.wompiTransactionId).toBe('wompi-123');
+      expect(approved.gatewayTransactionId).toBe('gateway-123');
       expect(approved.id).toBe(transaction.id);
       expect(approved.updatedAt.getTime()).toBeGreaterThan(
         transaction.updatedAt.getTime(),
@@ -181,14 +181,14 @@ describe('Transaction Entity', () => {
         baseTransactionData.idempotencyKey,
         baseTransactionData.createdAt,
         baseTransactionData.updatedAt,
-        'wompi-123',
+        'gateway-123',
       );
 
       const declined = transaction.decline('Payment declined');
 
       expect(declined.status).toBe(TransactionStatus.DECLINED);
       expect(declined.errorMessage).toBe('Payment declined');
-      expect(declined.wompiTransactionId).toBe('wompi-123');
+      expect(declined.gatewayTransactionId).toBe('gateway-123');
       expect(declined.id).toBe(transaction.id);
       expect(declined.updatedAt.getTime()).toBeGreaterThan(
         transaction.updatedAt.getTime(),
@@ -214,13 +214,13 @@ describe('Transaction Entity', () => {
         baseTransactionData.idempotencyKey,
         baseTransactionData.createdAt,
         baseTransactionData.updatedAt,
-        'wompi-123',
+        'gateway-123',
       );
 
       const cancelled = transaction.cancel();
 
       expect(cancelled.status).toBe(TransactionStatus.CANCELLED);
-      expect(cancelled.wompiTransactionId).toBe('wompi-123');
+      expect(cancelled.gatewayTransactionId).toBe('gateway-123');
       expect(cancelled.id).toBe(transaction.id);
       expect(cancelled.updatedAt.getTime()).toBeGreaterThan(
         transaction.updatedAt.getTime(),
@@ -228,8 +228,8 @@ describe('Transaction Entity', () => {
     });
   });
 
-  describe('setWompiTransactionId', () => {
-    it('should set wompiTransactionId without changing status', () => {
+  describe('setGatewayTransactionId', () => {
+    it('should set gatewayTransactionId without changing status', () => {
       const transaction = new Transaction(
         baseTransactionData.id,
         baseTransactionData.productId,
@@ -248,9 +248,9 @@ describe('Transaction Entity', () => {
         baseTransactionData.updatedAt,
       );
 
-      const updated = transaction.setWompiTransactionId('wompi-456');
+      const updated = transaction.setGatewayTransactionId('gateway-456');
 
-      expect(updated.wompiTransactionId).toBe('wompi-456');
+      expect(updated.gatewayTransactionId).toBe('gateway-456');
       expect(updated.status).toBe(TransactionStatus.PENDING);
       expect(updated.id).toBe(transaction.id);
       expect(updated.updatedAt.getTime()).toBeGreaterThan(
@@ -258,7 +258,7 @@ describe('Transaction Entity', () => {
       );
     });
 
-    it('should preserve errorMessage when setting wompiTransactionId', () => {
+    it('should preserve errorMessage when setting gatewayTransactionId', () => {
       const transaction = new Transaction(
         baseTransactionData.id,
         baseTransactionData.productId,
@@ -279,10 +279,10 @@ describe('Transaction Entity', () => {
         'Previous error',
       );
 
-      const updated = transaction.setWompiTransactionId('wompi-789');
+      const updated = transaction.setGatewayTransactionId('gateway-789');
 
       expect(updated.errorMessage).toBe('Previous error');
-      expect(updated.wompiTransactionId).toBe('wompi-789');
+      expect(updated.gatewayTransactionId).toBe('gateway-789');
     });
   });
 });

@@ -1,14 +1,14 @@
-export interface WompiPaymentAdapter {
+export interface GatewayPaymentAdapter {
   tokenizeCard(
-    cardData: WompiCardTokenizationRequest,
-  ): Promise<WompiCardTokenizationResponse>;
+    cardData: GatewayCardTokenizationRequest,
+  ): Promise<GatewayCardTokenizationResponse>;
   createPayment(
-    paymentData: WompiPaymentRequest,
-  ): Promise<WompiPaymentResponse>;
-  getPaymentStatus(transactionId: string): Promise<WompiPaymentStatus>;
+    paymentData: GatewayPaymentRequest,
+  ): Promise<GatewayPaymentResponse>;
+  getPaymentStatus(transactionId: string): Promise<GatewayPaymentStatus>;
 }
 
-export interface WompiCardTokenizationRequest {
+export interface GatewayCardTokenizationRequest {
   number: string;
   cvc: string;
   expMonth: string;
@@ -16,7 +16,7 @@ export interface WompiCardTokenizationRequest {
   cardHolder: string;
 }
 
-export interface WompiCardTokenizationResponse {
+export interface GatewayCardTokenizationResponse {
   status: string;
   data: {
     id: string;
@@ -32,7 +32,7 @@ export interface WompiCardTokenizationResponse {
   };
 }
 
-export interface WompiPaymentRequest {
+export interface GatewayPaymentRequest {
   amountInCents: number;
   currency: string;
   customerEmail: string;
@@ -46,7 +46,7 @@ export interface WompiPaymentRequest {
   redirectUrl?: string;
 }
 
-export interface WompiPaymentResponse {
+export interface GatewayPaymentResponse {
   data: {
     id: string;
     status: string;
@@ -61,7 +61,7 @@ export interface WompiPaymentResponse {
   };
 }
 
-export interface WompiPaymentStatus {
+export interface GatewayPaymentStatus {
   data: {
     id: string;
     status: string;

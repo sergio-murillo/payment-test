@@ -14,7 +14,7 @@ export interface Transaction {
   deliveryAddress: string;
   deliveryCity: string;
   deliveryPhone: string;
-  wompiTransactionId?: string;
+  gatewayTransactionId?: string;
   idempotencyKey: string;
   createdAt: string;
   updatedAt: string;

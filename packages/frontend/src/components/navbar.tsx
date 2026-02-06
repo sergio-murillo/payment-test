@@ -27,7 +27,7 @@ export function Navbar() {
           onKeyDown={(e) => e.key === 'Enter' && router.push('/')}
         >
           <ShopOutlined className="navbar-brand-icon" />
-          <span className="navbar-brand-text">Wompi Store</span>
+          <span className="navbar-brand-text">Payment Store</span>
         </div>
 
         {/* Nav Actions */}

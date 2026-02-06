@@ -171,7 +171,7 @@ describe('GetAllTransactionsUseCase', () => {
         deliveryCity: 'Bogotá',
         deliveryPhone: '+57 300 123 4567',
         idempotencyKey: 'key-001',
-        wompiTransactionId: 'wompi-123',
+        gatewayTransactionId: 'gateway-123',
         errorMessage: undefined,
         createdAt: now.toISOString(),
         updatedAt: now.toISOString(),
@@ -183,7 +183,7 @@ describe('GetAllTransactionsUseCase', () => {
     const result = await useCase.execute();
 
     expect(result.success).toBe(true);
-    expect(result.data?.[0].wompiTransactionId).toBe('wompi-123');
+    expect(result.data?.[0].gatewayTransactionId).toBe('gateway-123');
   });
 
   it('should handle errors gracefully', async () => {

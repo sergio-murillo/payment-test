@@ -1,7 +1,7 @@
 {
-  "name": "@wompi-payments/backend",
+  "name": "@payment-gateway/backend",
   "version": "1.0.0",
-  "description": "Wompi Payments Backend API",
+  "description": "Payments Backend API",
   "main": "dist/main.js",
   "scripts": {
     "build": "nest build",

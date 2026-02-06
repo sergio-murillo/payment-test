@@ -36,7 +36,7 @@ export class StepFunctionsService {
     this.sfnClient = new SFNClient(clientConfig);
     this.stateMachineArn = this.configService.get<string>(
       'STEP_FUNCTION_ARN',
-      'arn:aws:states:us-east-1:123456789012:stateMachine:WompiPaymentProcessor-dev',
+      'arn:aws:states:us-east-1:123456789012:stateMachine:PaymentProcessor-dev',
     );
   }
 

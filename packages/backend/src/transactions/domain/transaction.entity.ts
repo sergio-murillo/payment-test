@@ -17,7 +17,7 @@ export class Transaction {
     public readonly idempotencyKey: string,
     public readonly createdAt: Date,
     public readonly updatedAt: Date,
-    public readonly wompiTransactionId?: string,
+    public readonly gatewayTransactionId?: string,
     public readonly errorMessage?: string,
   ) {}
 
@@ -38,7 +38,7 @@ export class Transaction {
       data.idempotencyKey,
       new Date(data.createdAt),
       new Date(data.updatedAt),
-      data.wompiTransactionId,
+      data.gatewayTransactionId,
       data.errorMessage,
     );
   }
@@ -63,8 +63,8 @@ export class Transaction {
     };
 
     // Solo incluir campos opcionales si tienen valores definidos
-    if (this.wompiTransactionId !== undefined) {
-      data.wompiTransactionId = this.wompiTransactionId;
+    if (this.gatewayTransactionId !== undefined) {
+      data.gatewayTransactionId = this.gatewayTransactionId;
     }
     if (this.errorMessage !== undefined) {
       data.errorMessage = this.errorMessage;
@@ -73,7 +73,7 @@ export class Transaction {
     return data;
   }
 
-  approve(wompiTransactionId: string): Transaction {
+  approve(gatewayTransactionId: string): Transaction {
     return new Transaction(
       this.id,
       this.productId,
@@ -90,7 +90,7 @@ export class Transaction {
       this.idempotencyKey,
       this.createdAt,
       new Date(),
-      wompiTransactionId,
+      gatewayTransactionId,
     );
   }
 
@@ -111,7 +111,7 @@ export class Transaction {
       this.idempotencyKey,
       this.createdAt,
       new Date(),
-      this.wompiTransactionId,
+      this.gatewayTransactionId,
       errorMessage,
     );
   }
@@ -133,11 +133,11 @@ export class Transaction {
       this.idempotencyKey,
       this.createdAt,
       new Date(),
-      this.wompiTransactionId,
+      this.gatewayTransactionId,
     );
   }
 
-  setWompiTransactionId(wompiTransactionId: string): Transaction {
+  setGatewayTransactionId(gatewayTransactionId: string): Transaction {
     return new Transaction(
       this.id,
       this.productId,
@@ -154,7 +154,7 @@ export class Transaction {
       this.idempotencyKey,
       this.createdAt,
       new Date(),
-      wompiTransactionId,
+      gatewayTransactionId,
       this.errorMessage,
     );
   }

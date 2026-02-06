@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { WompiPaymentAdapter } from '../domain/wompi-payment-adapter';
+import { GatewayPaymentAdapter } from '../domain/payment-gateway.port';
 import { TransactionRepository } from '../../transactions/domain/transaction.repository';
 import { TransactionStatus } from '../../transactions/domain/transaction-status.enum';
 import { ProcessPaymentDto } from './process-payment.dto';
@@ -10,7 +10,7 @@ import { SnsService } from '../../shared/messaging/sns.service';
 import { StepFunctionsService } from '../../shared/orchestration/step-functions.service';
 import { UpdateInventoryUseCase } from '../../inventory/application/update-inventory.use-case';
 import { CompensateTransactionUseCase } from './compensate-transaction.use-case';
-import { WOMPI_PAYMENT_ADAPTER_TOKEN } from '../payments.tokens';
+import { PAYMENT_GATEWAY_ADAPTER_TOKEN } from '../payments.tokens';
 import { TRANSACTION_REPOSITORY_TOKEN } from '../../transactions/transactions.tokens';
 
 export type Result<T> = {
@@ -22,8 +22,8 @@ export type Result<T> = {
 @Injectable()
 export class ProcessPaymentUseCase {
   constructor(
-    @Inject(WOMPI_PAYMENT_ADAPTER_TOKEN)
-    private readonly wompiAdapter: WompiPaymentAdapter,
+    @Inject(PAYMENT_GATEWAY_ADAPTER_TOKEN)
+    private readonly gatewayAdapter: GatewayPaymentAdapter,
     @Inject(TRANSACTION_REPOSITORY_TOKEN)
     private readonly transactionRepository: TransactionRepository,
     private readonly eventStoreService: EventStoreService,
@@ -36,17 +36,16 @@ export class ProcessPaymentUseCase {
   ) {}
 
   async execute(dto: ProcessPaymentDto): Promise<Result<any>> {
+    this.logger.debug(
+      `Processing payment for transaction: ${dto.transactionId}`,
+      'ProcessPaymentUseCase',
+    );
+
+    // Get transaction
+    const transaction = await this.transactionRepository.findById(
+      dto.transactionId,
+    );
     try {
-      this.logger.debug(
-        `Processing payment for transaction: ${dto.transactionId}`,
-        'ProcessPaymentUseCase',
-      );
-
-      // Get transaction
-      const transaction = await this.transactionRepository.findById(
-        dto.transactionId,
-      );
-
       if (!transaction) {
         return {
           success: false,
@@ -62,7 +61,7 @@ export class ProcessPaymentUseCase {
       }
 
       // Tokenize card first
-      const tokenizationResult = await this.wompiAdapter.tokenizeCard({
+      const tokenizationResult = await this.gatewayAdapter.tokenizeCard({
         number: dto.cardNumber,
         cvc: dto.cvc,
         expMonth: dto.expMonth,
@@ -201,6 +200,12 @@ export class ProcessPaymentUseCase {
         'ProcessPaymentUseCase',
       );
 
+      if (transaction) {
+        const updatedTransaction = transaction.decline(
+          `Pago fallido por error técnico, vuelve a intentarlo más tarde`,
+        );
+        await this.transactionRepository.update(updatedTransaction);
+      }
       return {
         success: false,
         error: 'Failed to process payment',
@@ -229,9 +234,12 @@ export class ProcessPaymentUseCase {
         };
       }
 
-      const publicKey = this.configService.get<string>('WOMPI_PUBLIC_KEY', '');
-      // Create payment in Wompi
-      const wompiResponse = await this.wompiAdapter.createPayment({
+      const publicKey = this.configService.get<string>(
+        'GATEWAY_PUBLIC_KEY',
+        '',
+      );
+      // Create payment in gateway
+      const gatewayResponse = await this.gatewayAdapter.createPayment({
         amountInCents: transaction.totalAmount * 100,
         currency: 'COP',
         customerEmail: transaction.customerEmail,
@@ -244,19 +252,19 @@ export class ProcessPaymentUseCase {
         publicKey,
       });
 
-      const wompiTransactionId = wompiResponse.data.id;
+      const gatewayTransactionId = gatewayResponse.data.id;
 
       // If payment is already in final state, update transaction immediately
-      if (wompiResponse.data.status !== 'PENDING') {
+      if (gatewayResponse.data.status !== 'PENDING') {
         let updatedTransaction: any;
-        if (wompiResponse.data.status === 'APPROVED') {
-          updatedTransaction = transaction.approve(wompiTransactionId);
+        if (gatewayResponse.data.status === 'APPROVED') {
+          updatedTransaction = transaction.approve(gatewayTransactionId);
         } else if (
-          ['DECLINED', 'VOIDED', 'ERROR'].includes(wompiResponse.data.status)
+          ['DECLINED', 'VOIDED', 'ERROR'].includes(gatewayResponse.data.status)
         ) {
           updatedTransaction = transaction.decline(
-            wompiResponse.data.status_message ||
-              `Payment ${wompiResponse.data.status.toLowerCase()}`,
+            gatewayResponse.data.status_message ||
+              `Payment ${gatewayResponse.data.status.toLowerCase()}`,
           );
         }
 
@@ -269,8 +277,8 @@ export class ProcessPaymentUseCase {
             eventType: 'PaymentProcessed',
             eventData: {
               transactionId: transaction.id,
-              wompiTransactionId,
-              status: wompiResponse.data.status,
+              gatewayTransactionId,
+              status: gatewayResponse.data.status,
             },
             timestamp: new Date(),
           });
@@ -279,39 +287,39 @@ export class ProcessPaymentUseCase {
           await this.snsService.publish({
             eventType: 'PaymentProcessed',
             transactionId: transaction.id,
-            status: wompiResponse.data.status,
-            wompiTransactionId,
+            status: gatewayResponse.data.status,
+            gatewayTransactionId,
           });
 
           return {
             success: true,
             data: {
               transaction: updatedTransaction,
-              wompiResponse: wompiResponse.data,
+              gatewayResponse: gatewayResponse.data,
             },
           };
         }
       }
 
-      // If payment is PENDING, save wompiTransactionId and start polling
+      // If payment is PENDING, save gatewayTransactionId and start polling
       this.logger.debug(
-        `Payment created with status PENDING, saving wompiTransactionId and starting polling for transaction: ${wompiTransactionId}`,
+        `Payment created with status PENDING, saving gatewayTransactionId and starting polling for transaction: ${gatewayTransactionId}`,
         'ProcessPaymentUseCase',
       );
 
-      // Save wompiTransactionId to transaction for polling
-      const transactionWithWompiId =
-        transaction.setWompiTransactionId(wompiTransactionId);
-      await this.transactionRepository.update(transactionWithWompiId);
+      // Save gatewayTransactionId to transaction for polling
+      const transactionWithgatewayId =
+        transaction.setGatewayTransactionId(gatewayTransactionId);
+      await this.transactionRepository.update(transactionWithgatewayId);
 
       // If waitForPolling is true (Step Functions context), wait for polling to complete
       // Otherwise, start polling in background (non-blocking) for direct execution
       if (waitForPolling) {
         this.logger.debug(
-          `Waiting for payment polling to complete for transaction: ${wompiTransactionId}`,
+          `Waiting for payment polling to complete for transaction: ${gatewayTransactionId}`,
           'ProcessPaymentUseCase',
         );
-        await this.pollPaymentStatus(transactionId, wompiTransactionId);
+        await this.pollPaymentStatus(transactionId, gatewayTransactionId);
 
         // After polling completes, get the updated transaction
         const updatedTransaction =
@@ -328,13 +336,13 @@ export class ProcessPaymentUseCase {
           success: true,
           data: {
             transaction: updatedTransaction,
-            wompiResponse: wompiResponse.data,
+            gatewayResponse: gatewayResponse.data,
             status: updatedTransaction.status,
           },
         };
       } else {
         // Start polling in background (non-blocking) for direct execution
-        this.pollPaymentStatus(transactionId, wompiTransactionId).catch(
+        this.pollPaymentStatus(transactionId, gatewayTransactionId).catch(
           (error) => {
             this.logger.error(
               `Error in payment polling for transaction ${transactionId}`,
@@ -349,7 +357,7 @@ export class ProcessPaymentUseCase {
           success: true,
           data: {
             transaction,
-            wompiResponse: wompiResponse.data,
+            gatewayResponse: gatewayResponse.data,
             status: 'PENDING',
           },
         };
@@ -369,12 +377,12 @@ export class ProcessPaymentUseCase {
   }
 
   /**
-   * Hace polling del estado de la transacción en Wompi hasta que cambie de PENDING
+   * Hace polling del estado de la transacción en gateway hasta que cambie de PENDING
    * o se alcance el tiempo máximo configurado
    */
   private async pollPaymentStatus(
     transactionId: string,
-    wompiTransactionId: string,
+    gatewayTransactionId: string,
   ): Promise<void> {
     const pollingInterval = this.configService.get<number>(
       'PAYMENT_POLLING_INTERVAL_MS',
@@ -389,7 +397,7 @@ export class ProcessPaymentUseCase {
     let pollCount = 0;
 
     this.logger.debug(
-      `Starting payment status polling for Wompi transaction: ${wompiTransactionId}`,
+      `Starting payment status polling for gateway transaction: ${gatewayTransactionId}`,
       'ProcessPaymentUseCase',
     );
 
@@ -399,12 +407,12 @@ export class ProcessPaymentUseCase {
         await new Promise((resolve) => setTimeout(resolve, pollingInterval));
 
         const statusResponse =
-          await this.wompiAdapter.getPaymentStatus(wompiTransactionId);
+          await this.gatewayAdapter.getPaymentStatus(gatewayTransactionId);
 
         const status = statusResponse.data.status;
 
         this.logger.debug(
-          `Poll ${pollCount}: Payment status for ${wompiTransactionId} is ${status}`,
+          `Poll ${pollCount}: Payment status for ${gatewayTransactionId} is ${status}`,
           'ProcessPaymentUseCase',
         );
 
@@ -428,7 +436,7 @@ export class ProcessPaymentUseCase {
 
           let updatedTransaction: any;
           if (status === 'APPROVED') {
-            updatedTransaction = transaction.approve(wompiTransactionId);
+            updatedTransaction = transaction.approve(gatewayTransactionId);
           } else if (['DECLINED', 'VOIDED', 'ERROR'].includes(status)) {
             updatedTransaction = transaction.decline(
               statusResponse.data.status_message ||
@@ -445,7 +453,7 @@ export class ProcessPaymentUseCase {
               eventType: 'PaymentProcessed',
               eventData: {
                 transactionId: transaction.id,
-                wompiTransactionId,
+                gatewayTransactionId,
                 status,
               },
               timestamp: new Date(),
@@ -456,7 +464,7 @@ export class ProcessPaymentUseCase {
               eventType: 'PaymentProcessed',
               transactionId: transaction.id,
               status,
-              wompiTransactionId,
+              gatewayTransactionId,
             });
 
             // Continue workflow: Update Inventory if approved
@@ -494,7 +502,7 @@ export class ProcessPaymentUseCase {
 
     // Timeout reached
     this.logger.warn(
-      `Payment polling timeout reached for transaction ${transactionId} (Wompi ID: ${wompiTransactionId}) after ${maxDuration}ms`,
+      `Payment polling timeout reached for transaction ${transactionId} (gateway ID: ${gatewayTransactionId}) after ${maxDuration}ms`,
       'ProcessPaymentUseCase',
     );
   }

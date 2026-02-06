@@ -171,10 +171,10 @@ describe('Step Functions Handlers', () => {
           transaction: {
             productId: 'prod-001',
             status: TransactionStatus.APPROVED,
-            wompiTransactionId: 'wompi-123',
+            gatewayTransactionId: 'gateway-123',
           },
-          wompiResponse: {
-            id: 'wompi-123',
+          gatewayResponse: {
+            id: 'gateway-123',
             status: 'APPROVED',
           },
         },
@@ -187,7 +187,7 @@ describe('Step Functions Handlers', () => {
       });
 
       expect(result.transactionId).toBe('trans-001');
-      expect(result.wompiTransactionId).toBe('wompi-123');
+      expect(result.gatewayTransactionId).toBe('gateway-123');
       expect(result.status).toBe('APPROVED');
       expect(result.productId).toBe('prod-001');
       expect(
@@ -200,7 +200,7 @@ describe('Step Functions Handlers', () => {
         success: true,
         data: {
           transaction: { productId: 'prod-001' },
-          wompiResponse: { id: 'wompi-123', status: 'APPROVED' },
+          gatewayResponse: { id: 'gateway-123', status: 'APPROVED' },
         },
       });
 
@@ -219,7 +219,7 @@ describe('Step Functions Handlers', () => {
         success: true,
         data: {
           transaction: { productId: 'prod-001' },
-          wompiResponse: { id: 'wompi-123', status: 'APPROVED' },
+          gatewayResponse: { id: 'gateway-123', status: 'APPROVED' },
         },
       });
 
@@ -282,16 +282,16 @@ describe('Step Functions Handlers', () => {
       ).rejects.toThrow('Failed to process payment');
     });
 
-    it('should get status from transaction when wompiResponse has no status', async () => {
+    it('should get status from transaction when gatewayResponse has no status', async () => {
       mockProcessPaymentUseCase.executePaymentStep.mockResolvedValue({
         success: true,
         data: {
           transaction: {
             productId: 'prod-001',
             status: 'DECLINED',
-            wompiTransactionId: 'wompi-456',
+            gatewayTransactionId: 'gateway-456',
           },
-          wompiResponse: { id: 'wompi-456' },
+          gatewayResponse: { id: 'gateway-456' },
         },
       });
 
@@ -303,12 +303,12 @@ describe('Step Functions Handlers', () => {
       expect(result.status).toBe('DECLINED');
     });
 
-    it('should default status to PENDING when neither wompiResponse nor transaction has status', async () => {
+    it('should default status to PENDING when neither gatewayResponse nor transaction has status', async () => {
       mockProcessPaymentUseCase.executePaymentStep.mockResolvedValue({
         success: true,
         data: {
           transaction: { productId: 'prod-001' },
-          wompiResponse: {},
+          gatewayResponse: {},
         },
       });
 
@@ -320,15 +320,15 @@ describe('Step Functions Handlers', () => {
       expect(result.status).toBe('PENDING');
     });
 
-    it('should get wompiTransactionId from transaction when wompiResponse has no id', async () => {
+    it('should get gatewayTransactionId from transaction when gatewayResponse has no id', async () => {
       mockProcessPaymentUseCase.executePaymentStep.mockResolvedValue({
         success: true,
         data: {
           transaction: {
             productId: 'prod-001',
-            wompiTransactionId: 'wompi-from-tx',
+            gatewayTransactionId: 'gateway-from-tx',
           },
-          wompiResponse: { status: 'APPROVED' },
+          gatewayResponse: { status: 'APPROVED' },
         },
       });
 
@@ -337,7 +337,7 @@ describe('Step Functions Handlers', () => {
         paymentToken: 'tok_123',
       });
 
-      expect(result.wompiTransactionId).toBe('wompi-from-tx');
+      expect(result.gatewayTransactionId).toBe('gateway-from-tx');
     });
 
     it('should get productId from input.transaction when transaction data has no productId', async () => {
@@ -345,7 +345,7 @@ describe('Step Functions Handlers', () => {
         success: true,
         data: {
           transaction: {},
-          wompiResponse: { id: 'wompi-123', status: 'APPROVED' },
+          gatewayResponse: { id: 'gateway-123', status: 'APPROVED' },
         },
       });
 
@@ -363,7 +363,7 @@ describe('Step Functions Handlers', () => {
         success: true,
         data: {
           transaction: {},
-          wompiResponse: { id: 'wompi-123', status: 'APPROVED' },
+          gatewayResponse: { id: 'gateway-123', status: 'APPROVED' },
         },
       });
 
@@ -389,7 +389,7 @@ describe('Step Functions Handlers', () => {
 
       expect(result.transactionId).toBe('trans-001');
       expect(result.status).toBe('PENDING');
-      expect(result.wompiTransactionId).toBeUndefined();
+      expect(result.gatewayTransactionId).toBeUndefined();
     });
   });
 
@@ -590,13 +590,13 @@ describe('Step Functions Handlers', () => {
 
       const result = await compensateTransactionHandler({
         transactionId: 'trans-001',
-        wompiTransactionId: 'wompi-123',
+        gatewayTransactionId: 'gateway-123',
         status: 'ERROR',
       });
 
       expect(result.transactionId).toBe('trans-001');
       expect(result.compensated).toBe(true);
-      expect(result.wompiTransactionId).toBe('wompi-123');
+      expect(result.gatewayTransactionId).toBe('gateway-123');
       expect(result.status).toBe('ERROR');
     });
   });
